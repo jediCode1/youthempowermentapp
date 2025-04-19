@@ -545,7 +545,7 @@ io.on("connection", (socket)=>{
 		
 	})
 	
-	socket.on("delete-conversation-message",(data)=>{
+	socket.on("delete-conversation-message",async(data)=>{
 		
 		let recieverId = data.recieverId
 		let messageId = data.messageId
