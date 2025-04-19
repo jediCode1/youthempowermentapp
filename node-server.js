@@ -19,7 +19,7 @@ mongoClient.connect()
 
 //server calls management
 
-const express = import('express')
+const {express} = require('express')
 
 const app = express()
 app.use(express.json({limit:"1mb"}));
