@@ -1,8 +1,7 @@
 const path = import ('path');
 const {fileURLToPath} = import('url');
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import http from 'http'
 const bodyparser = import("body-parser")
 const mv = import("mv")
