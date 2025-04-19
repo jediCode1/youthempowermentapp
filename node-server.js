@@ -1,16 +1,16 @@
 const path = import ('path');
 const {fileURLToPath} = import('url');
 
-import http from 'http'
+const {http} = import('http')
 const bodyparser = import("body-parser")
 const mv = import("mv")
 const moveFile = import("move-file")
-import {Server} from 'socket.io'
+const {Server} =import('socket.io')
 const uri = "mongodb://localhost:27017"
-import upload  from 'express-fileupload';
+const {upload} = import('express-fileupload');
 import fs from 'fs'
 
-import { MongoClient } from 'mongodb';
+const { MongoClient } = import('mongodb');
  
  // Enable command monitoring for debugging
 const mongoClient = new MongoClient('mongodb://localhost:27017', { monitorCommands: true });
