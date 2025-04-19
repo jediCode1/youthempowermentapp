@@ -1,4 +1,4 @@
-import path from 'path';
+const path = import ('path');
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
