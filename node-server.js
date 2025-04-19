@@ -548,7 +548,7 @@ io.on("connection", (socket)=>{
 	socket.on("delete-conversation-message",(data)=>{
 		
 		let recieverId = data.recieverId
-		let messageId = data.messageId,
+		let messageId = data.messageId
 		let accessorId = data.accessor
 		
 		let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"})
