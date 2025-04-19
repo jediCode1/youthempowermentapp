@@ -10,7 +10,7 @@ const uri = "mongodb://localhost:27017"
 const {upload} = import('express-fileupload');
 const{fs} = import('fs')
 
-const { MongoClient } = import('mongodb');
+const { MongoClient } = require('mongodb');
  
  // Enable command monitoring for debugging
 const mongoClient = new MongoClient('mongodb://localhost:27017', { monitorCommands: true });
