@@ -6,7 +6,7 @@ import http from 'http'
 const bodyparser = import("body-parser")
 const mv = import("mv")
 const moveFile = import("move-file")
-const {Server} = import('socket.io')
+import {Server} from 'socket.io'
 const uri = "mongodb://localhost:27017"
 import upload from 'express-fileupload'
 const fs = import('fs')
