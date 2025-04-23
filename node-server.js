@@ -2,7 +2,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
-const {http} = import('http')
+import http from 'http'
 const bodyparser = import("body-parser")
 const mv = import("mv")
 const moveFile = import("move-file")
