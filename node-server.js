@@ -1,7 +1,7 @@
 const path = import('path') 
 const {fileURLToPath} = import('url')
 
-import {http} from 'http'
+const {http} = import('http')
 const bodyparser = import("body-parser")
 const mv = import("mv")
 const moveFile = import("move-file")
