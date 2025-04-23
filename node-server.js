@@ -1,16 +1,16 @@
-const path = import ('path');
-const {fileURLToPath} = import('url');
+import path from 'path'
+import {fileURLToPath} from 'url'
 
-const {http} = import('http')
+import {http} from 'http'
 const bodyparser = import("body-parser")
 const mv = import("mv")
 const moveFile = import("move-file")
-const {Server} =import('socket.io')
+import {Server} from 'socket.io'
 const uri = "mongodb://localhost:27017"
-const {upload} = import('express-fileupload');
-const{fs} = import('fs')
+import {upload} from 'express-fileupload'
+import fs from 'fs'
 
-const { MongoClient } = require('mongodb');
+import { MongoClient } from 'mongodb';
  
  // Enable command monitoring for debugging
 const mongoClient = new MongoClient('mongodb://localhost:27017', { monitorCommands: true });
@@ -552,15 +552,32 @@ io.on("connection", (socket)=>{
 		let accessorId = data.accessor
 		
 		let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"})
+		let getBusinesses = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-businesses"})
 	    let users = getUsers.body 
+		let businesses = getBusinesses.body
 		
-		let reciever = users.find((users)=>{
+		let user_x = users.find((users)=>{
 			return users.userId === recieverId
 		})
+		let business_x = businesses.find((businesses)=>{
+			return businesses.businessId == recieverId
+		})
 		
-		let user = users.find((users)=>{
+		let reciever = null
+		
+		if(user_x){
+			reciever = user_x
+		}else{
+			reciever = business
+		}
+		
+		let user;
+		let user_y= users.find((users)=>{
 	        return users.userId === accessorId
 	    })
+		let business_y = businesses.find((businesses)=>{
+			return businesses.businessId == accessorId
+		})
 		
 		let conversations = user.conversations 
 	    
@@ -589,6 +606,11 @@ io.on("connection", (socket)=>{
 		}) 
 		
 		conversation2.messages.splice(index,1)
+		
+		await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-profiles"},{$set:{"body":users}})
+		if(business_x || business_y){
+			await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-businesses"},{$set:{"body":businesses}})
+		}
 		
 		socket.emit("recieve-fresh-conversation" , {
 	        "senderId":userId, 
