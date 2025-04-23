@@ -14,8 +14,8 @@ const fs = import('fs')
 import { MongoClient } from 'mongodb'
  
  // Enable command monitoring for debugging
-const mongoClient = new MongoClient('mongodb://localhost:27017', { monitorCommands: true });
-mongoClient.connect()
+const mongoClient = new MongoClient('mongodb+srv://shopmatesales:N6Npa7vcMIaBULIS@cluster0.mgv7t.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0', { monitorCommands: true });
+mongoClient.connect()// Enable command monitoring for debugging
 
 
 //server calls management
