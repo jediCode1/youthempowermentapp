@@ -7,7 +7,7 @@ const mv = import("mv")
 const moveFile = import("move-file")
 const {Server} = import('socket.io')
 const uri = "mongodb://localhost:27017"
-import {upload} from 'express-fileupload'
+import upload from 'express-fileupload'
 const fs = import('fs')
 
 import { MongoClient } from 'mongodb'
