@@ -1,5 +1,5 @@
 const path = import('path') 
-import {fileURLToPath} from 'url'
+const {fileURLToPath} = import('url')
 
 import {http} from 'http'
 const bodyparser = import("body-parser")
