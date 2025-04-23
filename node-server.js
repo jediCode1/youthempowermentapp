@@ -1,4 +1,4 @@
-import path from 'path'
+const path = import('path') 
 import {fileURLToPath} from 'url'
 
 import {http} from 'http'
