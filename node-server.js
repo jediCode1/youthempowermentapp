@@ -290,10 +290,87 @@ let transferSocket = null
 
 let liveFeeds = []
 
+let purchaseRequests = []
+
 io.on("connection", (socket)=>{
 	
 	console.log("connected")
 	transferSocket = socket
+	/*Sale window calls*/
+	socket.on("send-purchase-request",async(data)=>{
+	    let accessorId = data.accessorId 
+	    let request = data.request
+	    let socketCheck = await checkIfSocketActive(accessorId)
+	    if(socketCheck == true){
+	        let search = purchaseRequests.find((purchaseRequests)=>{
+	            return purchaseRequests.buyerId === accessorId
+	        })
+	        if(!search){
+	            purchaseRequests.push(request)
+	        }else{
+	            let index = purchaseRequests.findIndex((purchaseRequests)=>{
+    	            return purchaseRequests.buyerId === accessorId
+    	        })
+    	        purchaseRequests[index] = request
+	        }
+	    }
+	})
+	
+	
+	socket.on("get-payment-request", async(data)=>{
+	    let id = data.accessorId
+	    let socketCheck = await checkIfSocketActive(id)
+	    if(socketCheck == true){
+	        let search = purchaseRequests.find((purchaseRequests)=>{
+	            return purchaseRequests.buyerId === id
+	        })
+	        socket.emit("recieve-payment-request",{
+	            "accessorId":id,
+	            "data": search
+	        })
+	    }
+	})
+	
+	socket.on("send-cash-transfer-status",(data)=>{
+	    socket.emit("recieve-cash-transfer-status",data)
+	})
+	
+	////////////<Video Call Requests>////////////
+	
+	socket.on("init-video-call",async(data)=>{
+	    data.incomingCall = true
+	    socket.emit("recieve-video-call",data)
+    })
+	
+    socket.on("init-audio-call",async(data)=>{
+        data.incomingCall = true
+	    socket.emit("recieve-audio-call",data)
+	})
+	
+	socket.on("connect-to-call",(data)=>{
+	    socket.emit("confirm-call-connect",data)
+	})
+	
+	socket.on("send-end-call",(data)=>{
+	    if(data.call == true){
+	        socket.emit("end-audio-call",data)
+	    }else{
+	        socket.emit("end-video-call",data)
+	    }
+	}
+	
+	
+	
+	////////////<Video Call Requests>////////////
+	
+	//Shipping and delivery requests broadcasts 
+	socket.on("send-shipping-update-broadcast",(data)=>{
+		socket("recieve-shipping-update-broadcast",data)
+	})
+	
+	socket.on("send-delivery-update-broadcast",(data)=>{
+		socket("recieve-delivery-update-broadcast",data)
+	})
 	
 	//Comment events 
 	socket.on("send-catalogue-deleted",(data)=>{
@@ -308,7 +385,7 @@ io.on("connection", (socket)=>{
 	
 	//Streaming events
 	
-	ss(socket).on("broadcast-live-stream",async(inputStream,data)=>{
+	socket.on("broadcast-live-stream-data",async(data)=>{
 		try{
 			
 			let gSockets = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-sockets"})
@@ -316,8 +393,6 @@ io.on("connection", (socket)=>{
 			let feedData = data.feedData
 			
 			liveFeeds.push(feedData)
-			
-			ss(socket).emit(`connect-to-feed/${feedData.feedId}`,inputStream)
 			
 		}catch{
 			
@@ -341,6 +416,15 @@ io.on("connection", (socket)=>{
 	})
 	
 	//internal socket EVENTS
+	
+	socket.on("emit-close-conversation",(data)=>{
+		let accessorId = data.accessorId 
+		let conversationId = data.conversationId
+		socket.emit("close-convo",{
+			"conversationId": conversationId,
+			"reason":reason
+		})
+	})
 	
 	socket.on("register-current-conversation",async(data)=>{
 		let accessorId = data.accessorId
@@ -389,13 +473,13 @@ io.on("connection", (socket)=>{
 				})
 			}else{
 				socket.emit("close-convo",{
-					"conversationId": accessorId,
+					"conversationId": conversationId,
 					"reason":"blocked"
 				})
 			}
 		}else{
 			socket.emit("close-convo",{
-				"conversationId": accessorId,
+				"conversationId": conversationId,
 				"reason":"user-non-existent"
 			})
 		}
@@ -423,7 +507,7 @@ io.on("connection", (socket)=>{
 	
 	socket.on("send-seen-messages",(data)=>{
 		let userId = data.userId 
-		let check = checkIfSocketActive(userId)
+		let check = await checkIfSocketActive(userId)
 		if(check == true){
 			socket.emit("recieve-seen-messages",{
 				"conversationId":data.conversationId,
@@ -487,19 +571,21 @@ io.on("connection", (socket)=>{
                 
                 notifications.push(notification)
 	        }
-	        
-	        let visitors = business.visitors  
-	        
-	        for(var i=0; i<visitors.length ; i++){
-	            let friend = visitors[i].userId
-                let search = users.find((users)=>{
-                    users.userId === friend
-                })
-                let notifications = search.notifications 
-                
-                notifications.push(notification)
-	        }
-	        
+	        if(data.alertVisitors){
+				
+				let visitors = business.visitors  
+				
+				for(var i=0; i<visitors.length ; i++){
+					let friend = visitors[i].userId
+					let search = users.find((users)=>{
+						users.userId === friend
+					})
+					let notifications = search.notifications 
+					
+					notifications.push(notification)
+				}
+				
+			}
 	        socket.emit("recieve-business-notifications",{
 	            "businessId": userId,
 	            "notification": notification
@@ -515,7 +601,7 @@ io.on("connection", (socket)=>{
 		
 		let userId = data.userId
 		
-		let getAdminData = await mongoClient.db("YEMPData").collection("AdminOnlyInfo").findOne({"name":"admin-object"})
+		let getAdminData = await mongoClient.db("YEMPData").collection("AdminOnlyInfo").findOne({"name":"admin-controller-data"})
 		let adminData = getAdminData.body 
 		
 		let getSockets = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-sockets"});
@@ -541,7 +627,7 @@ io.on("connection", (socket)=>{
 			}
 		}
 		
-		await mongoClient.db("YEMPData").collection("AdminOnlyInfo").updateOne({"name":"admin-object"},{$set:{"body":adminData}})
+		await mongoClient.db("YEMPData").collection("AdminOnlyInfo").updateOne({"name":"admin-controller-data"},{$set:{"body":adminData}})
 		await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-sockets"},{$set:{"body":sockets}})
 		
 	})
@@ -1713,6 +1799,56 @@ app.post("/get-posts-data", async(request,response)=>{
     
 })
 
+const findSinglePosts = async(posts,mediaInfo)=>{
+	let output = null 
+	
+	for(var i=0; i<posts.length; i++){
+		
+		let post = posts[i]
+		let type = post.classType
+		if(classType === "MediaPost"){
+			if(
+				it.id === mediaInfo.id &&
+				it.format === mediaInfo.format &&
+				it.type === mediaInfo.type 
+			){
+				output = post
+			}
+		}
+		
+	}
+	
+	return output
+}
+
+app.post("/get-media-post-data",async(request,response)=>{
+	try{
+		
+		let data = request.body 
+		let mediaInfo = data.mediaInfo 
+		let accessorId = data.accessorId 
+		
+		let socketCheck = await checkIfSocketActive(accessorId)
+		if(socketCheck == true){
+			
+			let getUserPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-posts"})
+			let posts = getUserPosts.body
+			let post = await findSinglePosts(posts,mediaInfo)
+			if(post){
+				response.send(JSON.stringify({"status":"success","post":post}))
+			}else{
+				response.send(JSON.stringify({"status":"post-not-found"}))
+			}
+			
+		}else{
+			response.sendStatus(404)
+		}
+		
+	}catch{
+		response.send(JSON.stringify({"status":"server-error"}))
+	}
+})
+
 async function GetVideoCategories(videos){
 	
 	let categories = []
@@ -1740,7 +1876,7 @@ app.post("/get-video-categories", async(request,response)=>{
 		
 		let data = request.body
 		let userId = data.userId 
-		let socketCheck = checkIfSocketActive(userId)
+		let socketCheck = await checkIfSocketActive(userId)
 		if(socketCheck == true){
 			
 			let getVideos = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"video-posts"})
@@ -1764,7 +1900,7 @@ app.post("/get-videos-by-category", async(request,response)=>{
 		let data = request.body
 		let userId = data.userId 
 		let category = data.category
-		let socketCheck = checkIfSocketActive(userId)
+		let socketCheck = await checkIfSocketActive(userId)
 		if(socketCheck == true){
 			let getVideos = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"video-posts"})
 			let videos = getVideos.body 
@@ -1946,14 +2082,156 @@ app.post("/upload-business-audio/:id", async(request,response)=>{
     
 })
 
+
+const FindUserStory = async(userId,stories)=>{
+    let output = null 
+    
+    for(var i=0; i<stories.length; i++){
+        let story = stories[i]
+        let basicDetails = story.basicDetails 
+        let userIdx = basicDetails.ownerId
+		let businessIdx = basicDetails.businessId
+        if(userIdx === userId || userId == businessIdx){
+            let datex = story.timePosted
+            if(
+                datex.date == serverTime.date &&
+                datex.month == serverTime.month &&
+                datex.year == serverTime.year
+            ){
+                output = story
+            }
+        }
+    }
+    return output
+}
+
+app.post("/get-current-story", async(request,response)=>{
+    try{
+        
+        let data = request.body 
+        
+        let accessorId = data.accessorId
+		//User ID universal with businessId
+        let userId = data.userId
+		let socketCheck = await checkIfSocketActive(accessorId)
+        
+		if(socketCheck == true){
+			let getStoryPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"story-posts"})
+			let stories = getStoryPosts.body
+			
+			let checkForStory = await FindUserStory(userId,stories)
+			
+			if(checkForStory){
+				response.send(JSON.stringify({"status":"success", "data": checkForStory}))
+			}else{
+				response.send(JSON.stringify({"status":"success", "data": null}))
+			}
+		}else{
+			response.sendStatus(404)
+		}
+        
+        
+    }catch{
+        response.send(JSON.stringify({"status":"server-error"}))
+    }
+});
+
+app.post("/update-story",async(request,response)=>{
+	try{
+		
+		let data = request.body
+		
+		let accessorId = data.accessorId 
+		let story = data.story  
+		
+		let socketCheck = await checkIfSocketActive(accessorId)
+		
+		if(socketCheck == true){
+		
+			let getStories = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"story-posts"})
+			
+			let stories = getStories.body
+			
+			let storyx = null
+			
+			if(story.basicDetails.businessId != null){
+				storyx = await FindUserStory(story.basicDetails.businessId,stories)
+			}else{			
+				storyx = await FindUserStory(story.basicDetails.ownerId,stories)
+			}
+			
+			if(storyx){
+				
+				let index = stories.find((stories)=>{
+					return stories.basicDetails.id === storyx.basicDetails.id
+				})
+				
+				stories[index] = story
+				
+				await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"story-posts"},{$set:{"body":stories}})
+				
+			}else{
+				
+				stories.push(story)
+				await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"story-posts"},{$set:{"body":stories}})
+				
+			}
+			
+			response.send(JSON.stringify({"status":"success"}))
+			
+		}else{
+			response.sendStatus(404)
+		}
+		
+	}catch{
+		response.send(JSON.stringify({"status":"server-error"}))
+	}
+})
+
+app.post("/register-channel-feed",async(request,response)=>{
+	try{
+		
+		let data = request.body 
+		let userId = data.userId 
+		let businessId = null
+		if(data.businessId){
+			businessId = data.businessId
+		}
+		let feed = data.feed 
+		let socketCheck = await checkIfSocketActive(userId)
+		if(socketCheck == true){
+			
+			var getChannelPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"channel-posts"})
+            let channelPosts = getChannelPosts.body 
+			let search = channelPosts.find((channelPosts)=>{
+				return channelPosts.basicDetails.id === feed.basicDetails.id
+			})
+			if(!search){				
+				channelPosts.push(feed)
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"channel-posts"},{$set:{"body":channelPosts}})
+				response.send(JSON.stringify({"status":"succcess"}))
+			}else{
+				response.send(JSON.stringify("status":"exists"))
+			}
+			
+		}else{
+			response.sendStatus(404)
+		}
+		
+	}catch{
+		response.send(JSON.stringify({"status":"server-error"}))
+	}
+})
+
 app.post("/upload-post" , async(request,response)=>{
     try{
         let data = request.body
         let userId = data.userId 
-        let postId = data.postId
         let post = data.post
         let type = data.type 
         
+		let socketCheck = await checkIfSocketActive(userId)
+		if(socketCheck == true){
             var getBusinessPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"business-posts"}) 
             var getUserPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-posts"})
             var getChannelPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"channel-posts"})
@@ -1963,6 +2241,8 @@ app.post("/upload-post" , async(request,response)=>{
             var getGroupPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"group-posts"})
             var getStoryPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"story-posts"})
             var getMarketPlacePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"market-place-posts"})
+            var getEvents = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"all-events"})
+            var getTips = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"business-tips"})
             
             
             
@@ -1976,58 +2256,385 @@ app.post("/upload-post" , async(request,response)=>{
             let groupPosts = getGroupPosts.body
             let religiousPosts = getReligiousPosts.body
             let marketPlacePosts = getMarketPlacePosts.body
-             
-        
-        if(type === "Basic Text Post"){ 
-            userPosts.push(post)
-            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body" : userPosts}})
-        }
-        if(type === "Media Story Post"){ 
-             userPosts.push(post)
-             await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body" : userPosts}})
-        } 
-        if(type === "Video Post"){ 
-             videoPosts.push(post)
-             await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"video-posts"},{$set:{"body" : videoPosts}})
-        }
-        
-        if(type === "Article Post"){ 
-             articlePosts.push(post)
-             await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"article-posts"},{$set:{"body" : articlePosts}})
-        }
-        
-        if(type === "Channel Feed Post"){ 
-             channelPosts.push(post)
-             await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"channel-posts"},{$set:{"body" : channelPosts}})
-        }
-        
-        if(type === "Market Place Post"){ 
-            marketPlacePosts.push(post)
-            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"market-place-posts"},{$set:{"body" : marketPlacePosts}})
-        } 
-        if(type === "Business Post"){ 
-            businessPosts.push(post)
-            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"business-posts"},{$set:{"body" : businessPosts}})
-        }
-        if(type === "Story Post"){ 
-            storyPosts.push(post)
-            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"story-posts"},{$set:{"body" : storyPosts}})
-        }
-        if(type === "Group Post"){ 
-            groupPosts.push(post)
-            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"group-posts"},{$set:{"body" : groupPosts}})
-        }
-        if(type === "Religious Post"){ 
-            religiousPosts.push(post)
-            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"religous-posts"},{$set:{"body" : religiousPosts}})
-        }
-        
-        response.send(JSON.stringify({"status":"success"}))
-        
+            let events = getEvents.body
+            let tips = getTips.body 
+			
+			if(type === "Basic Text Post"){ 
+				userPosts.push(post)
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body" : userPosts}})
+			}
+			if(type === "Media Post"){ 
+				 userPosts.push(post)
+				 await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body" : userPosts}})
+			} 
+			if(type === "Video Post"){ 
+				 videoPosts.push(post)
+				 await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"video-posts"},{$set:{"body" : videoPosts}})
+			}
+			
+			if(type === "Article Post"){ 
+				 articles.push(post)
+				 await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"article-posts"},{$set:{"body" : articlePosts}})
+			}
+			
+			if(type === "Channel Feed Post"){ 
+				 channelPosts.push(post)
+				 await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"channel-posts"},{$set:{"body" : channelPosts}})
+			}
+			
+			if(type === "Market Place Post"){ 
+				marketPlacePosts.push(post)
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"market-place-posts"},{$set:{"body" : marketPlacePosts}})
+			} 
+			if(type === "Business Post"){ 
+				businessPosts.push(post)
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"business-posts"},{$set:{"body" : businessPosts}})
+			}
+			if(type === "Story Post"){ 
+				storyPosts.push(post)
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"story-posts"},{$set:{"body" : storyPosts}})
+			}
+			if(type === "Group Post"){ 
+				groupPosts.push(post)
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"group-posts"},{$set:{"body" : groupPosts}})
+			}
+			if(type === "Religious Post"){ 
+				religiousPosts.push(post)
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"religous-posts"},{$set:{"body" : religiousPosts}})
+			}
+			if(type === "Event"){ 
+				events.push(post)
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"all-events"},{$set:{"body" : events}})
+			}
+			if(type === "Business Tip Of Day"){
+			    tips.push(post)
+			    await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"business-tips"},{$set:{"body":tips}})
+			}
+			
+			response.send(JSON.stringify({"status":"success"}))
+        }else{
+			response.sendStatus(404)
+		}
     }catch{
         response.send(JSON.stringify({"status":"server-error"}))
     }
 })
+
+app.post("/update-post" , async(request,response)=>{
+    try{
+        let data = request.body
+        let userId = data.userId 
+        let post = data.post
+        let type = data.type 
+        
+		let socketCheck = await checkIfSocketActive(userId)
+		if(socketCheck == true){
+            var getBusinessPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"business-posts"}) 
+            var getUserPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-posts"})
+            var getChannelPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"channel-posts"})
+            var getArticlePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"article-posts"})
+            var getVideoPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"video-posts"})
+            var getReligiousPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"religious-posts"})
+            var getGroupPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"group-posts"})
+            var getStoryPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"story-posts"})
+            var getMarketPlacePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"market-place-posts"})
+            var getEvents = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"all-events"})
+            var getTips = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"business-tips"})
+            
+            
+            //extraction 
+            let businessPosts = getBusinessPosts.body  
+            let userPosts = getUserPosts.body
+            let channelPosts = getChannelPosts.body
+            let articles = getArticlePosts.body 
+            let videoPosts = getVideoPosts.body
+            let storyPosts = getStoryPosts.body
+            let groupPosts = getGroupPosts.body
+            let religiousPosts = getReligiousPosts.body
+            let marketPlacePosts = getMarketPlacePosts.body
+            let events = getEvents.body
+            let tips = getTips.body
+             
+            let index = null 
+            
+            index = businessPosts.findIndex((businessPosts)=>{
+                return businessPosts.basicDetails.id === post.basicDetails.id
+            })
+            if(index == null){
+                index = marketPlacePosts.findIndex((marketPlacePosts)=>{
+                    return marketPlacePosts.basicDetails.id === post.basicDetails.id
+                })
+            }
+            if(index == null){
+                index = religiousPosts.findIndex((religiousPosts)=>{
+                    return religiousPosts.basicDetails.id === post.basicDetails.id
+                })
+            }
+            if(index == null){
+                index = groupPosts.findIndex((groupPosts)=>{
+                    return groupPosts.basicDetails.id === post.basicDetails.id
+                })
+            }
+            if(index == null){
+                index = userPosts.findIndex((userPosts)=>{
+                    return userPosts.basicDetails.id === post.basicDetails.id
+                })
+            }
+            if(index == null){
+                index = storyPosts.findIndex((storyPosts)=>{
+                    return storyPosts.basicDetails.id === post.basicDetails.id
+                })
+            }
+            if(index == null){
+                index = videoPosts.findIndex((videoPosts)=>{
+                    return videoPosts.basicDetails.id === post.basicDetails.id
+                })
+            }
+            if(index == null){
+                index = events.findIndex((events)=>{
+                    return events.basicDetails.id === post.basicDetails.id
+                })
+            }
+            if(index == null){
+                index = articles.findIndex(articles)=>{
+                    return articles.basicDetails.id === post.basicDetails.id
+                })
+            }
+            if(index == null){
+                index = channelPosts.findIndex((channelPosts)=>{
+                    return channelPosts.basicDetails.id === post.basicDetails.id
+                })
+            }
+			if(index == null){
+				index = tips.find((tips)=>{
+					return tips.basicDetails.id === post.basicDetails.id
+				}
+			}
+			
+			if(type === "Basic Text Post"){ 
+				userPosts[index] = post
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body" : userPosts}})
+			}
+			if(type === "Media Post"){ 
+				 userPosts[index] = post
+				 await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body" : userPosts}})
+			} 
+			if(type === "Video Post"){ 
+				 videoPosts[index] = post
+				 await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"video-posts"},{$set:{"body" : videoPosts}})
+			}
+			
+			if(type === "Article Post"){ 
+				 articles[index] = post
+				 await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"article-posts"},{$set:{"body" : articles}})
+			}
+			
+			if(type === "Channel Feed Post"){ 
+				 channelPosts[index] = post
+				 await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"channel-posts"},{$set:{"body" : channelPosts}})
+			}
+			
+			if(type === "Market Place Post"){ 
+				marketPlacePosts[index] = post
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"market-place-posts"},{$set:{"body" : marketPlacePosts}})
+			} 
+			if(type === "Business Post"){ 
+				businessPosts[index] = post
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"business-posts"},{$set:{"body" : businessPosts}})
+			}
+			if(type === "Story Post"){ 
+				storyPosts.push(post)
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"story-posts"},{$set:{"body" : storyPosts}})
+			}
+			if(type === "Group Post"){ 
+				groupPosts.push(post)
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"group-posts"},{$set:{"body" : groupPosts}})
+			}
+			if(type === "Religious Post"){ 
+				religiousPosts[index] = post
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"religous-posts"},{$set:{"body" : religiousPosts}})
+			}
+			if(type === "Event"){ 
+				events[index] = post
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"all-events"},{$set:{"body" : events}})
+			}
+			if(type === "Business Tip Of Day"){
+			    tips[index] = post
+			    await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"business-tips"},{$set:{"body":tips}})
+			}
+			
+			response.send(JSON.stringify({"status":"success"}))
+        }else{
+			response.sendStatus(404)
+		}
+    }catch{
+        response.send(JSON.stringify({"status":"server-error"}))
+    }
+})
+
+app.post("/find-post" , async(request,response)=>{
+    try{
+        let data = request.body
+        let userId = data.userId 
+        let post = data.post
+         
+        
+		let socketCheck = await checkIfSocketActive(userId)
+		if(socketCheck == true){
+            var getBusinessPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"business-posts"}) 
+            var getUserPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-posts"})
+            var getChannelPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"channel-posts"})
+            var getArticlePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"article-posts"})
+            var getVideoPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"video-posts"})
+            var getReligiousPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"religious-posts"})
+            var getGroupPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"group-posts"})
+            var getStoryPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"story-posts"})
+            var getMarketPlacePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"market-place-posts"})
+            var getEvents = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"all-events"})
+            var getTips = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"business-tips"})
+            
+            
+            //extraction 
+            let businessPosts = getBusinessPosts.body  
+            let userPosts = getUserPosts.body
+            let channelPosts = getChannelPosts.body
+            let articles = getArticlePosts.body 
+            let videoPosts = getVideoPosts.body
+            let storyPosts = getStoryPosts.body
+            let groupPosts = getGroupPosts.body
+            let religiousPosts = getReligiousPosts.body
+            let marketPlacePosts = getMarketPlacePosts.body
+            let events = getEvents.body
+            let tips = getTips.body
+             
+            let index = null 
+            
+            index = businessPosts.findIndex((businessPosts)=>{
+                return businessPosts.basicDetails.id === post.basicDetails.id
+            })
+            if(index == null){
+                index = marketPlacePosts.findIndex((marketPlacePosts)=>{
+                    return marketPlacePosts.basicDetails.id === post.basicDetails.id
+                })
+            }else{
+				type = "business posts"
+			}
+            if(index == null){
+                index = religiousPosts.findIndex((religiousPosts)=>{
+                    return religiousPosts.basicDetails.id === post.basicDetails.id
+                })
+            }else{
+				type = "market place posts"
+			}
+            if(index == null){
+                index = groupPosts.findIndex((groupPosts)=>{
+                    return groupPosts.basicDetails.id === post.basicDetails.id
+                })
+            }else{
+				type = "religious posts"
+			}
+            if(index == null){
+                index = userPosts.findIndex((userPosts)=>{
+                    return userPosts.basicDetails.id === post.basicDetails.id
+                })
+            }else{
+				type = "group posts"
+			}
+            if(index == null){
+                index = storyPosts.findIndex((storyPosts)=>{
+                    return storyPosts.basicDetails.id === post.basicDetails.id
+                })
+            }else{
+				type = "user posts"
+			}
+            if(index == null){
+                index = videoPosts.findIndex((videoPosts)=>{
+                    return videoPosts.basicDetails.id === post.basicDetails.id
+                })
+            }else{
+				type = "story posts"
+			}
+            if(index == null){
+                index = events.findIndex((events)=>{
+                    return events.basicDetails.id === post.basicDetails.id
+                })
+            }else{
+				type = "video posts"
+			}
+            if(index == null){
+                index = articles.findIndex(articles)=>{
+                    return articles.basicDetails.id === post.basicDetails.id
+                })
+            }else{
+				type = "events"
+			}
+            if(index == null){
+                index = channelPosts.findIndex((channelPosts)=>{
+                    return channelPosts.basicDetails.id === post.basicDetails.id
+                })
+            }else{
+				type = "article posts"
+			}
+			if(index == null){
+                index = tips.findIndex((tips)=>{
+                    return tips.basicDetails.id === post.basicDetails.id
+                })
+            }else{
+				type = "channel posts"
+			}
+			if(index != null){
+				type = "tips"
+			}
+
+			let output = null
+			
+			if(type === "user posts"){ 
+				output = userPosts[index]
+			}
+			
+			if(type === "video posts"){ 
+				output = videoPosts[index]
+			}
+			
+			if(type === "article posts"){ 
+				output = articles[index]
+			}
+			
+			if(type === "channel posts"){ 
+				output = channelPosts[index]
+			}
+			
+			if(type === "market place posts"){ 
+				output = marketPlacePosts[index]
+			} 
+			if(type === "business posts"){ 
+				output = businessPosts[index]
+			}
+			if(type === "story posts"){ 
+				output = storyPosts[index]
+			}
+			if(type === "group posts"){ 
+				output = groupPosts[index]
+			}
+			if(type === "religious posts"){ 
+				output = religiousPosts[index]
+			}
+			if(type === "events"){ 
+				output = events[index]
+			}
+			if(type === "tips"){
+			    output = tips[index]
+			}
+			
+			response.send(JSON.stringify({"status":"success","data":output}))
+        }else{
+			response.sendStatus(404)
+		}
+    }catch{
+        response.send(JSON.stringify({"status":"server-error"}))
+    }
+})
+
 
 app.post("/comment-like-unlike" , async(request,response)=>{
     try{
@@ -2047,6 +2654,7 @@ app.post("/comment-like-unlike" , async(request,response)=>{
             var getGroupPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"group-posts"})
             var getStoryPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"story-posts"})
             var getMarketPlacePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"market-place-posts"})
+            var getEvents = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"all-events"})
             
             
             
@@ -2060,6 +2668,7 @@ app.post("/comment-like-unlike" , async(request,response)=>{
             let groupPosts = getGroupPosts.body
             let topicPosts = getTopicPosts.body
             let marketPlacePosts = getMarketPlacePosts.body
+            let events = getEvents.body
             
         const Processor = (postId,userId,commentId,action)=>{
             let output = { 
@@ -3756,27 +4365,52 @@ app.post("/change-user-password" , async( request,response )=>{
         let data = request.body
 
         let userId = data.accessorId
+		
+		let loginConsoleMode = data.loginConsoleMode
 
         let socketCheck = await checkIfSocketActive(userId)
         
         if( socketCheck == true ){
-            
-            let password = data.password 
-        
-            let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"})
-            
-            let users = getUsers.body 
-            
-            let search = users.find((users)=>{
-                return users.userId === userId
-            })
-            
-            search.password = password
-            
-            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-profiles"},{$set:{"body":users}})
-            
-            response.send(JSON.stringify({"status" : "success"}))
-        }
+			if(loginConsoleMode == "Non Admin"){
+				            
+				let password = data.password 
+			
+				let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"})
+				
+				let users = getUsers.body 
+				
+				let search = users.find((users)=>{
+					return users.userId === userId
+				})
+				
+				search.password = password
+				
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-profiles"},{$set:{"body":users}})
+				
+				response.send(JSON.stringify({"status" : "success"}))
+			
+			}else{
+				
+				let password = data.password 
+			
+				let getController = await mongoClient.db("YEMPData").collection("AdminOnlyInfo").findOne({"name":"admin-controller-data"})
+				
+				let admins = getUsers.admins 
+				
+				let search = admins.find((admins)=>{
+					return admins.adminId === userId
+				})
+				
+				search.password = password
+				
+				await mongoClient.db("YEMPData").collection("AdminOnlyInfo").updateOne({"name":"admin-controller-data"},{$set:{"body":admins}})
+				
+				response.send(JSON.stringify({"status" : "success"}))
+				
+			}
+        }else{
+			response.sendStatus(404)
+		}
 
         
     }catch{
@@ -3827,25 +4461,40 @@ app.post("/get-secret-question", async(request,response)=>{
         let data = request.body
 
         let email = data.emailAddress
+		let consoleMode = data.loginConsoleMode 
 
         let socketCheck = await checkIfSocketActive(userId)
         
         if( socketCheck == true ){
-            
-            let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"})
-            
-            let users = getUsers.body 
-            
-            let search = users.find((users)=>{
-                return users.emailAddress === emailAddress
-            })
-            
-            if(search){
-                response.send(JSON.stringify({"status" : "success","q": search.secretQuestion}))
+            if(loginConsoleMode === "Non Admin"){
+				let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"})
+				
+				let users = getUsers.body 
+				
+				let search = users.find((users)=>{
+					return users.emailAddress === emailAddress
+				})
+				
+				if(search){
+					response.send(JSON.stringify({"status" : "success","q": search.secretQuestion}))
+				}else{
+					response.send(JSON.stringify({"status" : "error"}))
+				}
             }else{
-                response.send(JSON.stringify({"status" : "error"}))
-            }
-            
+				let getController = await mongoClient.db("YEMPData").collection("AdminOnlyInfo").findOne({"name":"admin-controller-data"})
+				
+				let admins = getUsers.admins 
+				
+				let search = admins.find((admins)=>{
+					return admins.emailAddress === emailAddress
+				})
+				
+				if(search){
+					response.send(JSON.stringify({"status" : "success","q": search.secretQuestion}))
+				}else{
+					response.send(JSON.stringify({"status" : "error"}))
+				}
+			}
         }
 
         
@@ -3862,21 +4511,40 @@ app.post("/validate-secret-question", async(request,response)=>{
 		
 		let accessorId = data.accessorId 
 		
-		let check = checkIfSocketActive(accessorId)
+		let loginConsoleMode = data.loginConsoleMode
+		
+		let check = await checkIfSocketActive(accessorId)
 		
 		if(check == true){
-			let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"})
-			let users = getUsers.body 
 			
-			let user = users.find((users)=>{
-				return users.userId == accessorId
-			})
-			
-			if(user){
-				response.send(JSON.stringify({"status":"success","data":user}))
+			if(loginConsoleMode === "Non Admin"){
+				let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"})
+				let users = getUsers.body 
+				
+				let user = users.find((users)=>{
+					return users.userId == accessorId
+				})
+				
+				if(user){
+					response.send(JSON.stringify({"status":"success","data":user}))
+				}else{
+					response.send(JSON.stringify({"status":"user-not-found"}))
+				}
 			}else{
-				response.send(JSON.stringify({"status":"user-not-found"}))
+				let getController = await mongoClient.db("YEMPData").collection("AdminOnlyInfo").findOne({"name":"admin-controller-data"})
+				let admins = getController.admins 
+				
+				let admin = admins.find((admins)=>{
+					return admins.adminId == accessorId
+				})
+				
+				if(admin){
+					response.send(JSON.stringify({"status":"success","data":admin}))
+				}else{
+					response.send(JSON.stringify({"status":"user-not-found"}))
+				}
 			}
+			
 		}else{
 			response.sendStatus(404)
 		}
@@ -4123,7 +4791,7 @@ app.post("/get-fresh-group-data",async(request,response)=>{
 })
 
 
-app.post("/get-fresh-user-data",async(request,response)=>{
+app.post("/ -user-data",async(request,response)=>{
     try{
         let data = request.body 
         let accessorId = data.accessorId
@@ -4239,7 +4907,7 @@ app.post("/add-new-business",async(request,response)=>{
         
         if(socketCheck == true){
 
-            let process = await AddNewBusiness(data.businessData)
+            let process = await AddNewBusiness(data.businessData,userId)
             if( process == "success" ){
                 response.send(JSON.stringify({"status" : "success"}))
             }else{
@@ -4274,7 +4942,7 @@ app.get("/get-user-video/:id", async(request,response)=>{
 app.get("/get-user-image/:id", async(request,response)=>{
     try{
         let userId = request.params.id
-        if(checkIfSocketActive(userId) == true){
+        if(await checkIfSocketActive(userId) == true){
             let socket = await getUserSocket(userId)
             let mediaId = socket.mediaId
             let mediaFormat = socket.mediaFormat
@@ -4349,7 +5017,7 @@ app.get("/delete-user-video/:id", async(request,response)=>{
 app.get("/delete-user-image/:id", async(request,response)=>{
     try{
         let userId = request.params.id
-        if(checkIfSocketActive(userId) == true){
+        if(await checkIfSocketActive(userId) == true){
             let socket = await getUserSocket(userId)
             let mediaId = socket.mediaId
             let mediaFormat = socket.mediaFormat
@@ -4653,7 +5321,7 @@ app.post("/check-conversation-existence", async(request,response)=>{
 			let socketCheck = await checkIfSocketActive(accessorId)
 			if(socketCheck == true){
 				
-				let getAdminData = await mongoClient.db("YEMPData").collection("AdminOnlyInfo").findOne({"name":"admin-object"})
+				let getAdminData = await mongoClient.db("YEMPData").collection("AdminOnlyInfo").findOne({"name":"admin-controller-data"})
 				let adminData = getAdminData.body 
 				
 				let complaints = adminData.complaints 
@@ -4722,6 +5390,8 @@ app.post("/check-conversation-existence", async(request,response)=>{
 		
 	})
 
+	let businessQueue = []
+
 	app.post("/update-business-data", async(request,response)=>{
 		try{
 			
@@ -4733,17 +5403,7 @@ app.post("/check-conversation-existence", async(request,response)=>{
 			
 			if(socketCheck == true){
 				
-				let getBusinesses = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-businesses"});
-				let businesses = getBusinesses.body;
-				
-				let index = businesses.findIndex((businesses)=>{
-					return businesses.businessId === businessData.businessId
-				});
-				
-				businesses[index] = businessData 
-				
-				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-businesses"},{$set:{"body":businesses}})
-				
+				businessQueue.push(businessData)
 				response.send(JSON.stringify({"status":"success"}))
 				
 			}else{
@@ -4756,6 +5416,8 @@ app.post("/check-conversation-existence", async(request,response)=>{
 		}
 	})
 
+	let usersQueue = []
+
 	app.post("/update-user-data", async(request,response)=>{
 		try{
 			
@@ -4767,17 +5429,7 @@ app.post("/check-conversation-existence", async(request,response)=>{
 			
 			if(socketCheck == true){
 				
-				let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"});
-				let users = getUsers.body;
-				
-				let index = users.findIndex((users)=>{
-					return users.userId === userData.userId
-				});
-				
-				users[index] = userData 
-				
-				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-profiles"},{$set:{"body":users}})
-				
+				usersQueue.push(userData)
 				response.send(JSON.stringify({"status":"success"}))
 				
 			}else{
@@ -4797,7 +5449,7 @@ app.post("/check-conversation-existence", async(request,response)=>{
 			
 			let emailAddress = data.emailAddress 
 			
-			let getData = await mongoClient.db("YEMPData").collection("AdminOnlyInfo").findOne({"name":"admin-object"});
+			let getData = await mongoClient.db("YEMPData").collection("AdminOnlyInfo").findOne({"name":"admin-controller-data"});
 			
 			let adminData = getData.body
 			
@@ -4817,7 +5469,7 @@ app.post("/check-conversation-existence", async(request,response)=>{
 				createUserDirectories(data.adminId)
 				addUserSocket(data.adminId)
 				
-				await mongoClient.db("YEMPData").collection("AdminOnlyInfo").updateOne({"name":"admin-object"},{$set:{"body":adminData}});
+				await mongoClient.db("YEMPData").collection("AdminOnlyInfo").updateOne({"name":"admin-controller-data"},{$set:{"body":adminData}});
 				
 				response.send(JSON.stringify({"status":"success"}))
 			}
@@ -5065,5 +5717,913 @@ app.post("/check-conversation-existence", async(request,response)=>{
 			response.send(JSON.stringify({"status":"server-error"}))
 		}
 	})
+	
+	let adminUpdateQueue = []
+	
+	
+	async function updateAdminController(){
+		if(adminUpdateQueue.length > 0){
+			for(var i = 0; i<adminUpdateQueue.length; i++){
+				let controller = adminUpdateQueue[i]
+				await mongoClient.db("YEMPData").collection("AdminOnlyInfo").updateOne({"name":"admin-controller-data"},{$set:{"body":controller}})
+			}
+		}
+	}
+	async function updateBusinesses(){
+		if(businessQueue.length > 0){
+			for(var i = 0; i<businessQueue.length; i++){
+				let businessData = businessQueue[i]
+				let getBusinesses = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-businesses"});
+				let businesses = getBusinesses.body;
+				
+				let index = businesses.findIndex((businesses)=>{
+					return businesses.businessId === businessData.businessId
+				});
+				
+				businesses[index] = businessData 
+				
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-businesses"},{$set:{"body":businesses}})
+				
+			}
+		}
+	}
+	
+	async function updateUsers(){
+		if(usersQueue.length > 0){
+			for(var i = 0; i<usersQueue.length; i++){
+				
+				let userData = usersQueue[i]
+				let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"});
+				let users = getUsers.body;
+				
+				let index = users.findIndex((users)=>{
+					return users.userId === userData.userId
+				});
+				
+				users[index] = userData 
+				
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-profiles"},{$set:{"body":users}})
+				
+			}
+		}
+	}
+	
+	async function updateGroups(){
+		if(groupUpdateQueue.length > 0){
+			for(var i = 0; i<groupUpdateQueue.length; i++){
+				
+				let groupData = groupUpdateQueue[i]
+				let getGroups = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-groups"});
+				let groups = getUsers.body;
+				
+				let index = groups.findIndex((groups)=>{
+					return groups.groupId === userData.groupId
+				});
+				
+				groups[index] = groupData 
+				
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-groups"},{$set:{"body":groups}})
+				
+			}
+		}
+	}
+	
+	setInterval(async()=>{
+		updateBusinesses()
+		updateUsers()
+		updateGroups()
+		updateAdminController()
+	},30000)
+	
+	app.post("/update-admin-controller-data",async(request,response)=>{
+		try{
+			
+			let data = request.body 
+			
+			let accessorId = data.accessorId 
+			let adminData = data.adminData
+			
+			let socketCheck = await checkIfSocketActive(accessorId)
+			if(socketCheck == true){
+				adminUpdateQueue.push(adminData)
+				response.send(JSON.stringify({"status":"success"}))
+			}
+			
+		}catch{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+	})
+
+	app.post("/check-date-and-time", (request,response)=>{
+		try{
+			
+			allocateTime()
+			let time = request.body 
+			
+			if(
+				time.date == serverTime.date &&
+				time.month == serverTime.month &&
+				time.year == serverTime.year &&
+			){
+				response.send(JSON.stringify({"status":"success"}))
+			}else{
+				response.send(JSON.stringify({"status":"error"}))
+			}
+			
+		}catch{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+	})
+	let groupUpdateQueue = []
+	app.post("/update-group-data",async(request,response)=>{
+		try{
+			
+			let data = request.body 
+			
+			let accessorId = data.accessorId
+			
+			let groupData = data.groupData
+			
+			let socketCheck = await checkIfSocketActive(accessorId)
+			if(socketCheck == true){
+				
+				groupUpdateQueue.push(groupData)
+				response.send(JSON.stringify({"status":"success"}))
+				
+			}
+			
+		}catch{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+	})
+	
+	app.post("/update-shipping-request-message",async(request,response)=>{
+		try{
+			
+			let data = request.body
+			
+			let message = data.message 
+			let userId = data.userId
+			let shippingOrderId = data.shippingOrderId
+			let corresponderType = data.corresponderType
+			let corresponderId = data.corresponderId
+			let conversatorMode = data.conversatorMode 
+			
+			let socketCheck = await checkIfSocketActive(userId)
+			
+			if(socketCheck == true){
+				
+				let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"})
+				let getBusinesses = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-businesses"})
+				
+				let users = getUsers.body
+				let businesses = getBusinesses.body
+				
+				if(conversatorMode === "User"){
+					let sender = users.find((users)=>{
+						return users.userId === userId
+					})
+					
+					let senderRequests = sender.shippingRequests
+					let senderRequest = senderRequests.find((senderRequests)=>{
+						return senderRequests.orderId === shippingOrderId
+					})
+					let senderMsgs = senderRequest.messages
+					let messageIndex = senderMsgs.findOne((senderMsgs)=>{
+						return senderMsgs.id === message.id
+					})
+					senderMsgs[messageIndex] = message
+					
+					if(corresponderType === "Business"){
+						let reciever = businesses.find((businesses)=>{
+							return businesses.businessId === corresponderId
+						})
+						
+						let recieverRequests = reciever.shippingRequests
+						let recieverRequest = recieverRequests.find((recieverRequests)=>{
+							return recieverRequests.orderId === shippingOrderId
+						})
+						let recieverMsgs = recieverRequest.messages
+						let messageIndex2 = recieverMsgs.findOne((recieverMsgs)=>{
+							return recieverMsgs.id === message.id
+						})
+						recieverMsgs[messageIndex2] = message
+					}else{
+						let reciever = users.find((users)=>{
+							return users.userId === corresponderId
+						})
+						
+						let recieverRequests = reciever.shippingRequests
+						let recieverRequest = recieverRequests.find((recieverRequests)=>{
+							return recieverRequests.orderId === shippingOrderId
+						})
+						let recieverMsgs = recieverRequest.messages
+						let messageIndex2 = recieverMsgs.findOne((recieverMsgs)=>{
+							return recieverMsgs.id === message.id
+						})
+						recieverMsgs[messageIndex2] = message
+					}
+					
+				}else{
+					
+					let sender = businesses.find((businesses)=>{
+						return businesses.businessId === userId
+					})
+					
+					let senderRequests = sender.shippingRequests
+					let senderRequest = senderRequests.find((senderRequests)=>{
+						return senderRequests.orderId === shippingOrderId
+					})
+					let senderMsgs = senderRequest.messages
+					let messageIndex = senderMsgs.findOne((senderMsgs)=>{
+						return senderMsgs.id === message.id
+					})
+					senderMsgs[messageIndex] = message
+					
+					if(corresponderType === "Business"){
+						let reciever = businesses.find((businesses)=>{
+							return businesses.businessId === corresponderId
+						})
+						
+						let recieverRequests = reciever.shippingRequests
+						let recieverRequest = recieverRequests.find((recieverRequests)=>{
+							return recieverRequests.orderId === shippingOrderId
+						})
+						let recieverMsgs = recieverRequest.messages
+						let messageIndex2 = recieverMsgs.findOne((recieverMsgs)=>{
+							return recieverMsgs.id === message.id
+						})
+						recieverMsgs[messageIndex2] = message
+					}else{
+						let reciever = users.find((users)=>{
+							return users.userId === corresponderId
+						})
+						
+						let recieverRequests = reciever.shippingRequests
+						let recieverRequest = recieverRequests.find((recieverRequests)=>{
+							return recieverRequests.orderId === shippingOrderId
+						})
+						let recieverMsgs = recieverRequest.messages
+						let messageIndex2 = recieverMsgs.findOne((recieverMsgs)=>{
+							return recieverMsgs.id === message.id
+						})
+						recieverMsgs[messageIndex2] = message
+					}
+					
+				}
+				
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-profiles"},{$set:{"body":users}})
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-businesses"},{$set:{"body":businesses}})
+				
+				response.send(JSON.stringify({"status":"success"}))
+				
+			}else{
+				response.sendStatus(404)
+			}
+			
+		}catch{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+	})
+	
+	app.post("/update-delivery-request-message",async(request,response)=>{
+		try{
+			
+			let data = request.body
+			
+			let message = data.message 
+			let userId = data.userId
+			let deliveryRequestId = data.deliveryRequestId
+			let corresponderType = data.corresponderType
+			let corresponderId = data.corresponderId
+			let conversatorMode = data.conversatorMode 
+			
+			let socketCheck = await checkIfSocketActive(userId)
+			
+			if(socketCheck == true){
+				
+				let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"})
+				let getBusinesses = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-businesses"})
+				
+				let users = getUsers.body
+				let businesses = getBusinesses.body
+				
+				if(conversatorMode === "User"){
+					let sender = users.find((users)=>{
+						return users.userId === userId
+					})
+					
+					let senderRequests = sender.shippingRequests
+					let senderRequest = senderRequests.find((senderRequests)=>{
+						return senderRequests.orderId === deliveryRequestId
+					})
+					let senderMsgs = senderRequest.messages
+					let messageIndex = senderMsgs.findOne((senderMsgs)=>{
+						return senderMsgs.id === message.id
+					})
+					senderMsgs[messageIndex] = message
+					
+					if(corresponderType === "Business"){
+						let reciever = businesses.find((businesses)=>{
+							return businesses.businessId === corresponderId
+						})
+						
+						let recieverRequests = reciever.deliverMeQueue
+						let recieverRequest = recieverRequests.find((recieverRequests)=>{
+							return recieverRequests.orderId === deliveryRequestId
+						})
+						let recieverMsgs = recieverRequest.messages
+						let messageIndex2 = recieverMsgs.findOne((recieverMsgs)=>{
+							return recieverMsgs.id === message.id
+						})
+						recieverMsgs[messageIndex2] = message
+					}else{
+						let reciever = users.find((users)=>{
+							return users.userId === corresponderId
+						})
+						
+						let recieverRequests = reciever.deliverMeQueue
+						let recieverRequest = recieverRequests.find((recieverRequests)=>{
+							return recieverRequests.orderId === deliveryRequestId
+						})
+						let recieverMsgs = recieverRequest.messages
+						let messageIndex2 = recieverMsgs.findOne((recieverMsgs)=>{
+							return recieverMsgs.id === message.id
+						})
+						recieverMsgs[messageIndex2] = message
+					}
+					
+				}else{
+					
+					let sender = businesses.find((businesses)=>{
+						return businesses.businessId === userId
+					})
+					
+					let senderRequests = sender.deliverMeQueue
+					let senderRequest = senderRequests.find((senderRequests)=>{
+						return senderRequests.orderId === deliveryRequestId
+					})
+					let senderMsgs = senderRequest.messages
+					let messageIndex = senderMsgs.findOne((senderMsgs)=>{
+						return senderMsgs.id === message.id
+					})
+					senderMsgs[messageIndex] = message
+					
+					if(corresponderType === "Business"){
+						let reciever = businesses.find((businesses)=>{
+							return businesses.businessId === corresponderId
+						})
+						
+						let recieverRequests = reciever.deliverMeQueue
+						let recieverRequest = recieverRequests.find((recieverRequests)=>{
+							return recieverRequests.orderId === deliveryRequestId
+						})
+						let recieverMsgs = recieverRequest.messages
+						let messageIndex2 = recieverMsgs.findOne((recieverMsgs)=>{
+							return recieverMsgs.id === message.id
+						})
+						recieverMsgs[messageIndex2] = message
+					}else{
+						let reciever = users.find((users)=>{
+							return users.userId === corresponderId
+						})
+						
+						let recieverRequests = reciever.deliverMeQueue
+						let recieverRequest = recieverRequests.find((recieverRequests)=>{
+							return recieverRequests.orderId === deliveryRequestId
+						})
+						let recieverMsgs = recieverRequest.messages
+						let messageIndex2 = recieverMsgs.findOne((recieverMsgs)=>{
+							return recieverMsgs.id === message.id
+						})
+						recieverMsgs[messageIndex2] = message
+					}
+					
+				}
+				
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-profiles"},{$set:{"body":users}})
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-businesses"},{$set:{"body":businesses}})
+				
+				response.send(JSON.stringify({"status":"success"}))
+				
+			}else{
+				response.sendStatus(404)
+			}
+			
+		}catch{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+	})
+	
+	app.post("/check-conversation-existence",async(request,response)=>{
+		try{
+			
+			let data = request.body
+			
+			let accessorId = data.accessorId
+			let sender = data.sender
+			let reciever = data.reciever
+			let businessId = null 
+			if(data.businessId){
+				businessId = data.businessId
+			}
+			
+			let output {
+				"sender":null,
+				"reciever":null
+			};
+			
+			let socketCheck = await checkIfSocketActive(accessorId)
+			
+			if(socketCheck == true){
+				
+				let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"})
+				let getBusinesses = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-businesses"})
+				let users = getUsers.body 
+				let businesses = getBusinesses.body
+				
+				//locate sender 
+				
+				let userSender = users.find((users)=>{
+					return users.userId === sender
+				})
+				
+				let bizSender = users.find((businesses)=>{
+					return businesses.userId === sender
+				})
+				
+				if(bizSender){
+					let conversations = bizSender.conversations 
+					
+					let conversation = conversations.find((conversations)=>{
+						return conversations.senderId === reciever
+					})
+					
+					if(conversation){
+						output.reciever = "exists"
+					}else{
+						output.reciever = "non-existent"
+					}
+				}
+				if(userSender){
+					let conversations = bizSender.conversations 
+					
+					let conversation = conversations.find((conversations)=>{
+						return conversations.senderId === reciever
+					})
+					
+					if(conversation){
+						output.reciever = "exists"
+					}else{
+						output.reciever = "non-existent"
+					}
+				}
+				
+				if(businessId){
+					
+					let business = businesses.find((businesses)=>{
+						return businesses.businessId === businessId
+					})
+					
+					let conversations = business.conversations 
+					
+					let conversation = conversations.find((conversations)=>{
+						return conversations.senderId === sender
+					})
+					
+					if(conversation){
+						output.reciever = "exists"
+					}else{
+						output.reciever = "non-existent"
+					}
+					
+				}else{
+					
+					let user = users.find((users)=>{
+						return users.userId === recieverId
+					})
+					
+					let conversations = user.conversations 
+					
+					let conversation = conversations.find((conversations)=>{
+						return conversations.senderId === sender
+					})
+					
+					if(conversation){
+						output.reciever = "exists"
+					}else{
+						output.reciever = "non-existent"
+					}
+					
+				}
+				
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-profiles"},{$set:{"body":users}})
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-businesses"},{$set:{"body":businesses}})
+				
+				response.send(JSON.stringify({"status":"success","output":output}))
+				
+			}else{
+				response.sendStatus(404)
+			}
+			
+		}catch{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+	})
+	
+	app.post("/update-media-story",async(request,response)=>{
+	    try{
+	        let data = request.body 
+	        let accessorId = data.accessorId 
+	        let story = data.story
+	        let socketCheck = await checkIfSocketActive(accessorId)
+	        if(socketCheck == true){
+	            
+	            let getStories = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"story-posts"})
+	            let stories = getStories.body 
+	            let story = stories.find((stories)=>{
+	                return stories.basicDetails.id === story.basicDetails.id
+	            })
+	            if(story){
+	                let index = stories.findIndex((stories)=>{
+    	                return stories.basicDetails.id === story.basicDetails.id
+    	            })
+    	            stories[index] = story
+    	            
+    	            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"story-posts"},{$set:{"body":stories}})
+    	            
+    	            response.send(JSON.stringify({"status":"success"}))
+	            }
+	            
+	        }else{
+	            response.sendStatus(404)
+	        }
+	    }catch{
+	        response.send(JSON.stringify({"status":"server-error"}))
+	    }
+	})
+	
+	async function filterNames(input,users){
+	    let output = []
+	    
+	    for(var i=0;i<users.length;i++){
+	        let user = users[i]
+	        let r1 = user.firstName.toRegex()
+	        let r2 = user.lastName.toRegex()
+	        
+	        if(r1.matches(input) == true || r2.matches(input) == true){
+	            output.push(user.userId)
+	        }
+	        
+	        output.push(user)
+	    }
+	    
+	    return output
+	}
+	
+	async function filterGroups(input,groups){
+	    let output = []
+	    
+	    for(var i=0; i<groups.length;i++){
+	        let group = groups[i]
+	        let r1 = groupName.toRegex()
+	        let test = r1.matches(input)
+	        if(test == true){
+	            output.push(group)
+	        }
+	    }
+	    
+	    return output
+	}
+	
+	async function filterChannels(input,businesses){
+	    let output = []
+	    
+	    for(var i=0; i<businesses.length;i++){
+	        let business = businesses[i]
+	        let r1 = business.businessName.toRegex()
+	        let test = r1.matches(input)
+	        let test2 = r2.matches(input)
+	        if(test == true && business.type === "Video Channel"){
+	            output.push(business)
+	        }
+	    }
+	    
+	    return output
+	}
+	
+	async function keywordFind(keywords,input){
+	    let output = false 
+	    
+	    for(var i=0,keywords.length; i++){
+	        let x = keywords[i]
+	        let r = x.toRegex()
+	        let t = r.matches(input)
+	        if(t == true){
+	            output = true
+	        }
+	    }
+	    
+	    return output 
+	}
+	
+	async function filterChannelVideos(input,businesses){
+	    let output = []
+	    
+	    var getVideoPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"video-posts"})
+        let videos = getVideoPosts.body 
+        
+	    
+	    for(var i=0; i<businesses.length;i++){
+	        let business = businesses[i]
+	        let posts = business.posts
+	        let r1 = business.businessName.toRegex()
+	        let test = r1.matches(input)
+	        
+	        if(test == true && business.type === "Video Channel"){
+	            output.push(input)
+	        }
+	        for(var x=0; x<posts.length ; x++){
+	            
+	            let video = posts[x]
+	            
+	            if(classType == "Video"){
+	                let r1 = video.title.toRegex()
+	                let r2 = video.description.toRegex()
+	                let t1 = r1.matches(input)
+	                let t2 = r2.matches(input)
+	                let t3 = await keywordFind(video.keywords,input)
+	                if(t1 == true || t2 == true || t3 == true){
+	                    output.push(video)
+	                }
+	            }
+	        }
+	    }
+	    
+	    return output
+	}
+	
+	async function filterPages(input,businesses){
+	    let output = []
+	    for(var i=0; i<businesses.length;i++){
+	        let business = businesses[i]
+	        let r1 = business.businessName.toRegex()
+	        let test = r1.matches(input)
+	        if(test == true && business.type != "Video Channel"){
+	            output.push(business)
+	        }
+	    }
+	    return output
+	}
+	
+	async function filterPlaylists(input,playlists){
+	    let output = []
+	    
+	    for(var i=0; i<playlists.length; i++){
+	        let playlist = playlists[i]
+	        let name = playlist.name
+	        let r1 = name.toRegex()
+	        let test = r1.matches(input)
+	        if(test == true){
+	            output.push(playlist)
+	        }
+	    }
+	    
+	    return output
+	}
+	
+	app.post("/search-groups", async(request,response)=>{
+
+	    try{
+
+	        let data = request.body
+	        let accessorId = data.accessorId 
+	        let input = data.searchInput 
+	        let socketCheck = await checkIfSocketActive(input)
+	        
+	        if(socketCheck == true){
+	            
+	            let groups = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-groups"})
+	            let filtered = await filterGroups(groups.body,input)
+	            response.send(JSON.stringify({"status":"success","data":filtered}))
+	            
+	        }else{
+	            response.send(JSON.stringify({"status":"error"}))
+	        }
+	        
+	    }catch{
+	        response.send(JSON.stringify({"status":"server-error"}))
+	    }
+	})
+	
+	app.post("/search-playlists", async(request,response)=>{
+	    try{
+	        let data = request.body
+	        let accessorId = data.accessorId 
+	        let input = data.searchInput 
+	        let socketCheck = await checkIfSocketActive(input)
+	        
+	        if(socketCheck == true){
+	            
+	            let playlists = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-playlists"})
+	            let filtered = await filterPlaylists(playlists.body,input)
+	            response.send(JSON.stringify({"status":"success","data":filtered}))
+	            
+	            
+	        }else{
+	            response.send(JSON.stringify({"status":"error"}))
+	        }
+	        
+	    }catch{
+	        response.send(JSON.stringify({"status":"server-error"}))
+	    }
+	})
+	
+	app.post("/search-channel-videos", async(request,response)=>{
+	    try{
+	        let data = request.body
+	        let accessorId = data.accessorId 
+	        let input = data.searchInput 
+	        let socketCheck = await checkIfSocketActive(input)
+	        
+	        if(socketCheck == true){
+	            
+	            let businesses = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-businesses"})
+	            
+	            
+	        }else{
+	            response.send(JSON.stringify({"status":"error"}))
+	        }
+	        
+	    }catch{
+	        response.send(JSON.stringify({"status":"server-error"}))
+	    }
+	})
+	
+	app.post("/search-channels", async(request,response)=>{
+	    try{
+	        let data = request.body
+	        let accessorId = data.accessorId 
+	        let input = data.searchInput 
+	        let socketCheck = await checkIfSocketActive(input)
+	        
+	        if(socketCheck == true){
+	            
+	            let businesses = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-businesses"})
+	            let filtered = await filterChannels(businesses.body,input)
+	            response.send(JSON.stringify({"status":"success","data":filtered}))
+	            
+	        }else{
+	            response.send(JSON.stringify({"status":"error"}))
+	        }
+	        
+	    }catch{
+	        response.send(JSON.stringify({"status":"server-error"}))
+	    }
+	})
+	
+	app.post("/search-pages", async(request,response)=>{
+	    try{
+	        let data = request.body
+	        let accessorId = data.accessorId 
+	        let input = data.searchInput 
+	        let socketCheck = await checkIfSocketActive(input)
+	        
+	        if(socketCheck == true){
+	            
+	            let businesses = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-businesses"})
+	            let filtered = await filterPages(businesses.body,input)
+	            response.send(JSON.stringify({"status":"success","data":filtered}))
+	            
+	        }else{
+	            response.send(JSON.stringify({"status":"error"}))
+	        }
+	        
+	    }catch{
+	        response.send(JSON.stringify({"status":"server-error"}))
+	    }
+	    
+	})
+	
+	app.post("/search-people", async(request,response)=>{
+	    try{
+	        let data = request.body
+	        let accessorId = data.accessorId 
+	        let input = data.searchInput 
+	        let socketCheck = await checkIfSocketActive(input)
+	        
+	        if(socketCheck == true){
+	            
+	            let users = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profile"})
+	            let filteredUserNames = await filterNames(searchInput,users.body)
+	            
+	            response.send(JSON.stringify({"status":"success","data":filteredUserNames}))
+	            
+	        }else{
+	            response.send(JSON.stringify({"status":"error"}))
+	        }
+	        
+	    }catch{
+	        response.send(JSON.stringify({"status":"server-error"}))
+	    }
+	})
+	
+	//story cleaner service 
+	async function cleanUpStories(){
+	    let getStories = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"story-posts"})
+	    let stories = getStories.body 
+	    for(var i=0; i<stories.length;i++){
+	        let story = stories[i]
+	        let date = story.basicDetails.timePosted
+	        if(
+	            date.date != serverTime.date &&
+	            date.month != serverTime.month || 
+	            date.year != serverTime.year
+	        ){
+	            if(story.archived == false){
+	                stories.splice(i,1)
+	            }
+	           
+	        }
+	    }
+	    await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"story-posts"},{$set:{"body":stories}})
+	}
+	
+	app.post("/send-video-call-output/:id",async(request,response)=>{
+		try{
+
+			let userid = request.params.id 
+			
+			let socketCheck = await checkIfSocketActive(userid)
+			
+			if(socketCheck == true){
+
+				let readStream = ss(io.sockets).createStream()
+				fs.createReadStream(request.body).pipe(readStream)
+				
+				app.get(`/recieve-video-call-feed/${userid}`,(request,response)=>{
+				    response.pipe(readStream)
+				})
+				
+			}
+		}catch{
+			//No handler
+		}
+	})
+	app.post("/send-audio-call-output/:id",async(request,response)=>{
+		try{
+
+			let userid = request.params.id 
+			
+			let socketCheck = await checkIfSocketActive(userid)
+			
+			if(socketCheck == true){
+
+				let readStream = ss(io.sockets).createStream()
+				fs.createReadStream(request.body).pipe(readStream)
+				
+				app.get(`/recieve-audio-call-feed/${userid}`,(request,response)=>{
+				    response.pipe(readStream)
+				})
+			}
+		}catch{
+			//No handler
+		}
+	})
+	
+	app.post("/send-live-stream-output/:id",async(request,response)=>{
+		try{
+
+			let feedId = request.params.id 
+			
+			let feed = liveFeeds.find((liveFeeds)=>{
+			    return liveFeeds.feedId === feedId
+			})
+			
+			let accessorId = feed.accessorId
+			
+			let socketCheck = await checkIfSocketActive(accessorId)
+			
+			if(socketCheck == true){
+
+				let readStream = ss(io.sockets).createStream()
+				fs.createReadStream(request.body).pipe(readStream)
+				
+				app.get(`/recieve-live-feed/${userid}`,(request,response)=>{
+				    response.pipe(readStream)
+				})
+				
+				when(readStream.ended() == true){
+				    response.end("Completed")
+				}
+				
+			}
+		}catch{
+			//No handler
+		}
+	})
+	
+	
+	setInterval(cleanUpStories(),1000*60*5)
 
 server.listen(port)

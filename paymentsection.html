@@ -41,9 +41,13 @@
             let paymentData = null
             let userData = null
             
-            //http://192.168.8.100:1994/process-payment/?id=${userProfile!!.userId}
-            /*
+            http://192.168.8.100:1994/process-payment/?id=${userProfile!!.userId}
+            
             let userId = urlParams.get("id")
+            socket.emit("get-payment-data",{
+                "userId": userId
+            })
+        
 
             async function getUserData(){
                 if(paymentData.buyerType == "User"){
@@ -69,7 +73,7 @@
                 }
             }
             
-            getUserData()
+            
             
             async function loadImage(){
                 if(paymentData.buyerType == "Business"){
@@ -89,7 +93,8 @@
                     
                     profileImage.src = url
                     
-                }else{
+                }
+                else{
                     
                     socket.emit("set-media-params",{
                         "ownerId":userProfile.userId,
@@ -110,15 +115,18 @@
             }
             
             socket.emit("get-payment-request",{
-                "accessorId":owner
+                "accessorId":userId
             })
             
-            socket.on("recieve-payment-request",(data)=>{
+            socket.on("recieve-payment-request",async(data)=>{
                 if(data["accessorId"] == userId){
                     paymentData = data["data"]
+                    await getUserData()
                 }
             })
-            */
+            
+            
+            
             
             //Buttons & events
             let paymentBtn = document.getElementById("startBtn")
@@ -136,12 +144,20 @@
             })
 
 			let cancelSequence = ()=>{
+			    socket.on("send-cash-transfer-status",{
+			        "refCode":paymentData.refCode,
+			        "status":"Cancelled"
+			    })
 				setTimeout(()=>{
 					setTimeout(alert("You have cancelled your order"),1000)
 				},300)
 			}	
 			
 			let errorSequence = ()=>{
+			    socket.on("send-cash-transfer-status",{
+			        "refCode":paymentData.refCode,
+			        "status":"Cancelled"
+			    })
 				setTimeout(()=>{
 					setTimeout(alert("Something went wrong trying to process your order. Please try again later."),1000)
 				},300)
@@ -168,28 +184,19 @@
 				
 				if(response.status === "COMPLETED"){
 				
-					closePaypalProceed()
-				
-					let update = await fetch("/process-payment-data",{
-						method: 'POST',
-						body: JSON.stringify(paymentData),
-						"headers":{"Content-Type":"application/json"}
-					}) 
-				
+					
 					let x = await update.json()
 					
-					console.log(x)
-					
-					if(x.status == true){
-                        socket.emit("payment-complete",{
-                            "userId":userId,
-                            "businessId":paymentData.businessId
-                        })
-					}else{
-						setTimeout(alert("Something went wrong. Please try again later"),300)
-					}
+					socket.on("send-cash-transfer-status",{
+        			     "refCode":paymentData.refCode,
+        			     "status":"Complete"
+        			})
 					
 				}else{
+				    socket.on("send-cash-transfer-status",{
+        			     "refCode":paymentData.refCode,
+        			     "status":"Cancelled"
+        			})
 					setTimeout(alert("Something went wrong. Please try again later"),300)
 				}
 				
