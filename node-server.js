@@ -13,11 +13,13 @@ const fs = import('fs')
 
 import { MongoClient } from 'mongodb'
  
+/* 
  // Enable command monitoring for debugging
 const mongoClient = new MongoClient('mongodb+srv://shopmatesales:N6Npa7vcMIaBULIS@cluster0.mgv7t.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0', { monitorCommands: true });
 mongoClient.connect()// Enable command monitoring for debugging
-
-
+*/
+const mongoClient = new MongoClient(uri, { monitorCommands: true });
+mongoClient.connect()// Enable command monitoring for debugging
 //server calls management
 
 import express from 'express'
@@ -183,6 +185,7 @@ async function timeProcessor(){
 
 setInterval(timeProcessor,1000)
 
+
 async function getActiveUsers(){
     let output = null 
     
@@ -296,6 +299,26 @@ io.on("connection", (socket)=>{
 	
 	console.log("connected")
 	transferSocket = socket
+	
+	/*Comment Update Calls*/
+	socket.on("comment-posted",async(data)=>{
+		let accessorId = data.userId
+		let socketCheck = await checkIfSocketActive(accessorId)
+		if(socketCheck == true){
+			socket.emit("comments-updated",data)
+		}
+	})
+	
+	socket.on("comment-reply-posted", async(data)=>{
+		let accessorId = data.accessorId  
+		let socketCheck = await checkIfSocketActive(accessorId)
+		if(socketCheck == true){
+			socket.emit("comment-replies-updated",{
+				"commentId":data.commentId
+			})
+		}
+	})
+	
 	/*Sale window calls*/
 	socket.on("send-purchase-request",async(data)=>{
 	    let accessorId = data.accessorId 
@@ -357,7 +380,7 @@ io.on("connection", (socket)=>{
 	    }else{
 	        socket.emit("end-video-call",data)
 	    }
-	}
+	})
 	
 	
 	
@@ -370,6 +393,129 @@ io.on("connection", (socket)=>{
 	
 	socket.on("send-delivery-update-broadcast",(data)=>{
 		socket("recieve-delivery-update-broadcast",data)
+	})
+	
+	socket.on("send-delivery-request-messages-updated",(data)=>{
+		socket("recieve-delivery-request-broadcast",data)
+	})
+	
+	socket.on("send-shipping-request-messages-updated",(data)=>{
+		socket("recieve-shipping-request-broadcast",data)
+	})
+	
+	
+	socket.on("send-shipping-update-notification",async(data)=>{
+		try{
+			
+			let accessorId = data.accessorId 
+			let socketCheck = await checkIfSocketActive(accessorId)
+			if(socketCheck == true){
+				let buyerId = data.buyerId 
+				let sellerId = data.sellerId 
+				let buyerType = data.buyerType
+				let sellerType = data.sellerType
+				
+				let getBusinesses = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-businesses"})
+				let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"})
+				let businesses = getBusinesses.body
+				let users = getUsers.body
+				
+				if(buyerType == "User"){
+					let user = users.find((users)=>{
+						user.userId === buyerId
+					})
+					if(user){
+						user.notifications.push(data.notification)
+					}
+				}else{
+					let business = businesses.find((businesses)=>{
+						businesses.businessId === buyerId
+					})
+					if(business){
+						business.notifications.push(data.notification)
+					}
+				}
+				if(sellerType == "User"){
+					let user = users.find((users)=>{
+						user.userId === sellerId
+					})
+					if(user){
+						user.notifications.push(data.notification)
+					}
+				}else{
+					let business = businesses.find((businesses)=>{
+						businesses.businessId === sellerId
+					})
+					if(business){
+						business.notifications.push(data.notification)
+					}
+				}
+				
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-profiles"},{$set:{"body":users}})
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-businesses"},{$set:{"body":businesses}})
+			
+			}
+			
+		}catch{
+			console.log("data-base-down-please-check")
+		}
+	})
+	
+	socket.on("send-review-request-notification",async(data)=>{
+		try{
+			
+			let accessorId = data.accessorId 
+			let socketCheck = await checkIfSocketActive(accessorId)
+			if(socketCheck == true){
+				let buyerId = data.buyerId 
+				let sellerId = data.sellerId 
+				let buyerType = data.buyerType
+				let sellerType = data.sellerType
+				
+				let getBusinesses = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-businesses"})
+				let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"})
+				let businesses = getBusinesses.body
+				let users = getUsers.body
+				
+				if(buyerType == "User"){
+					let user = users.find((users)=>{
+						user.userId === buyerId
+					})
+					if(user){
+						user.notifications.push(data.notification)
+					}
+				}else{
+					let business = businesses.find((businesses)=>{
+						businesses.businessId === buyerId
+					})
+					if(business){
+						business.notifications.push(data.notification)
+					}
+				}
+				if(sellerType == "User"){
+					let user = users.find((users)=>{
+						user.userId === sellerId
+					})
+					if(user){
+						user.notifications.push(data.notification)
+					}
+				}else{
+					let business = businesses.find((businesses)=>{
+						businesses.businessId === sellerId
+					})
+					if(business){
+						business.notifications.push(data.notification)
+					}
+				}
+				
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-profiles"},{$set:{"body":users}})
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-businesses"},{$set:{"body":businesses}})
+				
+			}
+			
+		}catch{
+			console.log("data-base-down-please-check")
+		}
 	})
 	
 	//Comment events 
@@ -416,15 +562,6 @@ io.on("connection", (socket)=>{
 	})
 	
 	//internal socket EVENTS
-	
-	socket.on("emit-close-conversation",(data)=>{
-		let accessorId = data.accessorId 
-		let conversationId = data.conversationId
-		socket.emit("close-convo",{
-			"conversationId": conversationId,
-			"reason":reason
-		})
-	})
 	
 	socket.on("register-current-conversation",async(data)=>{
 		let accessorId = data.accessorId
@@ -473,13 +610,13 @@ io.on("connection", (socket)=>{
 				})
 			}else{
 				socket.emit("close-convo",{
-					"conversationId": conversationId,
+					"conversationId": accessorId,
 					"reason":"blocked"
 				})
 			}
 		}else{
 			socket.emit("close-convo",{
-				"conversationId": conversationId,
+				"conversationId": accessorId,
 				"reason":"user-non-existent"
 			})
 		}
@@ -505,7 +642,35 @@ io.on("connection", (socket)=>{
 		
 	})
 	
-	socket.on("send-seen-messages",(data)=>{
+	socket.on("send-enter-conversation",async(data)=>{
+	    let accessorId = data.accessorId
+	    let inputId = data.inputId
+	    let check = await checkIfSocketActive(accessorId)
+	    if(check == true){
+	        let getSockets = await mongoClient("YEMPData").collection("MainData").findOne({"name":"user-sockets"})
+	        let sockets = getSockets.body 
+	        let findSocket = sockets.find((sockets)=>{
+	            return sockets.userId === accessorId
+	        })
+	        if(findSocket){
+	            findSocket.currentConversation = inputId
+	            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-sockets"},{$set:{"body":sockets}})
+	            socket.emit("conversation-entered",{
+	                "recieverId":data.recieverId
+	            })
+	        }
+	    }
+	})
+	
+	socket.on("media-info-updated",(data)=>{
+	    socket.emit("recieve-media-update",data)
+	})
+	
+	socket.on("video-info-updated",(data)=>{
+		socket.emit("recieve-new-video-count",data)
+	})
+	
+	socket.on("send-seen-messages",async(data)=>{
 		let userId = data.userId 
 		let check = await checkIfSocketActive(userId)
 		if(check == true){
@@ -754,6 +919,84 @@ io.on("connection", (socket)=>{
 	    
 	})
 	
+	socket.on("emit-close-conversation", async(data)=>{
+	    let userId = data.senderId
+	    let recieverId = data.recieverId
+		let senderType = data.senderType
+	    let id = data.id
+	    let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"})
+	    let users = getUsers.body 
+	    let user = users.find((users)=>{
+	        return users.userId === userId
+	    })
+	    let reciever = users.find((users)=>{
+	        return users.userId === recieverId
+	    })
+	    let conversations = user.conversations 
+	    
+	    let conversation = conversations.find((conversations)=>{
+	        conversations.id === id
+	    }) 
+	    
+	    conversation1.closed = true
+	    
+	    let conversations2 = reciever.conversations 
+	    
+	    let conversation2 = conversations2.find((conversations2)=>{
+	        conversations2.id === id
+	    }) 
+	    
+	    conversation2.closed = true
+		
+	    socket.emit("close-conversation" , {
+	        "senderId":userId, 
+	        "recieverId":recieverId,
+	        "conversationId": conversation.conversationId
+	    })
+	    
+	    await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-profiles"},{$set:{"body":users}})
+	    
+	})
+	
+	socket.on("emit-open-conversation", async(data)=>{
+	    let userId = data.senderId
+	    let recieverId = data.recieverId
+		let senderType = data.senderType
+	    let id = data.id
+	    let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"})
+	    let users = getUsers.body 
+	    let user = users.find((users)=>{
+	        return users.userId === userId
+	    })
+	    let reciever = users.find((users)=>{
+	        return users.userId === recieverId
+	    })
+	    let conversations = user.conversations 
+	    
+	    let conversation = conversations.find((conversations)=>{
+	        conversations.id === id
+	    }) 
+	    
+	    conversation1.closed = false
+	    
+	    let conversations2 = reciever.conversations 
+	    
+	    let conversation2 = conversations2.find((conversations2)=>{
+	        conversations2.id === id
+	    }) 
+	    
+	    conversation2.closed = false
+		
+	    socket.emit("open-conversation" , {
+	        "senderId":userId, 
+	        "recieverId":recieverId,
+	        "conversationId": conversation.conversationId
+	    })
+	    
+	    await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-profiles"},{$set:{"body":users}})
+	    
+	})
+	
 	socket.on("disconnect manually" , (data)=>{
 		deactivateUserSocket(data.userId)
 		socket.emit("user-logof", {"userId" : id})
@@ -781,6 +1024,14 @@ io.on("connection", (socket)=>{
             socket.businessId = businessId
         }
 	    
+	})
+	
+	socket.on("admin-account-deleted",(data)=>{
+		socket.emit("notify-account-deleted",data)
+	})
+	
+	socket.on("admin-account-suspended",(data)=>{
+		socket.emit("notify-account-suspended",data)
 	})
 	
 	//update user Data
@@ -1727,6 +1978,65 @@ app.get("/process-payment",async(request,response)=>{
     }
 })
 
+async function filterDeletedPosts(dataFeed){
+	
+	for(var i=0; i<dataFeed.businessPosts.length; i++){
+		let post = dataFeed.businessPosts[i]
+		if(post.fileDeleted == true){
+			dataFeed.businessPosts.splice(i,1)
+		}
+	}
+	for(var i=0; i<dataFeed.userPosts.length; i++){
+		let post = dataFeed.userPosts[i]
+		if(post.fileDeleted == true){
+			dataFeed.userPosts.splice(i,1)
+		}
+	}
+	for(var i=0; i<dataFeed.channelPosts.length; i++){
+		let post = dataFeed.channelPosts[i]
+		if(post.fileDeleted == true){
+			dataFeed.channelPosts.splice(i,1)
+		}
+	}
+	for(var i=0; i<dataFeed.articles.length; i++){
+		let post = dataFeed.articles[i]
+		if(post.fileDeleted == true){
+			dataFeed.articles.splice(i,1)
+		}
+	}
+	for(var i=0; i<dataFeed.videoPosts.length; i++){
+		let post = dataFeed.videoPosts[i]
+		if(post.fileDeleted == true){
+			dataFeed.videoPosts.splice(i,1)
+		}
+	}
+	for(var i=0; i<dataFeed.storyPosts.length; i++){
+		let post = dataFeed.storyPosts[i]
+		if(post.fileDeleted == true){
+			dataFeed.storyPosts.splice(i,1)
+		}
+	}
+	for(var i=0; i<dataFeed.groupPosts.length; i++){
+		let post = dataFeed.groupPosts[i]
+		if(post.fileDeleted == true){
+			dataFeed.groupPosts.splice(i,1)
+		}
+	}
+	for(var i=0; i<dataFeed.topicPosts.length; i++){
+		let post = dataFeed.topicPosts[i]
+		if(post.fileDeleted == true){
+			dataFeed.topicPosts.splice(i,1)
+		}
+	}
+	for(var i=0; i<dataFeed.marketPlacePosts.length; i++){
+		let post = dataFeed.marketPlacePosts[i]
+		if(post.fileDeleted == true){
+			dataFeed.marketPlacePosts.splice(i,1)
+		}
+	}
+	return dataFeed
+}
+
 app.post("/get-posts-data", async(request,response)=>{
     
     try{
@@ -1776,7 +2086,8 @@ app.post("/get-posts-data", async(request,response)=>{
             
             //Processes (in this order)
     
-            let process_for_interests = await InterestsProcessor(dataFeed,userId)
+			let filterDeleted = await filterDeletedPosts(dataFeed)
+            let process_for_interests = await InterestsProcessor(filterDeleted,userId)
 			let process_for_dates = await TimePeriodProcessor(process_for_interests)
             let process_for_views_count = await ViewsProcessor(process_for_dates,userId)
             output = await process_for_views_count
@@ -2211,7 +2522,7 @@ app.post("/register-channel-feed",async(request,response)=>{
 				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"channel-posts"},{$set:{"body":channelPosts}})
 				response.send(JSON.stringify({"status":"succcess"}))
 			}else{
-				response.send(JSON.stringify("status":"exists"))
+				response.send(JSON.stringify({"status":"exists"}))
 			}
 			
 		}else{
@@ -2396,7 +2707,7 @@ app.post("/update-post" , async(request,response)=>{
                 })
             }
             if(index == null){
-                index = articles.findIndex(articles)=>{
+                index = articles.findIndex((articles)=>{
                     return articles.basicDetails.id === post.basicDetails.id
                 })
             }
@@ -2408,7 +2719,7 @@ app.post("/update-post" , async(request,response)=>{
 			if(index == null){
 				index = tips.find((tips)=>{
 					return tips.basicDetails.id === post.basicDetails.id
-				}
+				})
 			}
 			
 			if(type === "Basic Text Post"){ 
@@ -2443,11 +2754,11 @@ app.post("/update-post" , async(request,response)=>{
 				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"business-posts"},{$set:{"body" : businessPosts}})
 			}
 			if(type === "Story Post"){ 
-				storyPosts.push(post)
+				storyPosts[index] = post
 				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"story-posts"},{$set:{"body" : storyPosts}})
 			}
 			if(type === "Group Post"){ 
-				groupPosts.push(post)
+				groupPosts[index] = post
 				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"group-posts"},{$set:{"body" : groupPosts}})
 			}
 			if(type === "Religious Post"){ 
@@ -2472,11 +2783,517 @@ app.post("/update-post" , async(request,response)=>{
     }
 })
 
-app.post("/find-post" , async(request,response)=>{
+app.post("/delete-post" , async(request,response)=>{
     try{
         let data = request.body
         let userId = data.userId 
-        let post = data.post
+        let postId = data.postId
+        let type = data.type 
+        
+		let socketCheck = await checkIfSocketActive(userId)
+		if(socketCheck == true){
+            var getBusinessPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"business-posts"}) 
+            var getUserPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-posts"})
+            var getChannelPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"channel-posts"})
+            var getArticlePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"article-posts"})
+            var getVideoPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"video-posts"})
+            var getReligiousPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"religious-posts"})
+            var getGroupPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"group-posts"})
+            var getStoryPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"story-posts"})
+            var getMarketPlacePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"market-place-posts"})
+            var getEvents = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"all-events"})
+            var getTips = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"business-tips"})
+            
+            
+            //extraction 
+            let businessPosts = getBusinessPosts.body  
+            let userPosts = getUserPosts.body
+            let channelPosts = getChannelPosts.body
+            let articles = getArticlePosts.body 
+            let videoPosts = getVideoPosts.body
+            let storyPosts = getStoryPosts.body
+            let groupPosts = getGroupPosts.body
+            let religiousPosts = getReligiousPosts.body
+            let marketPlacePosts = getMarketPlacePosts.body
+            let events = getEvents.body
+            let tips = getTips.body
+             
+            let index = null 
+            
+            index = businessPosts.findIndex((businessPosts)=>{
+                return businessPosts.basicDetails.id === postId
+            })
+            if(index == null){
+                index = marketPlacePosts.findIndex((marketPlacePosts)=>{
+                    return marketPlacePosts.basicDetails.id === postId
+                })
+            }
+            if(index == null){
+                index = religiousPosts.findIndex((religiousPosts)=>{
+                    return religiousPosts.basicDetails.id === postId
+                })
+            }
+            if(index == null){
+                index = groupPosts.findIndex((groupPosts)=>{
+                    return groupPosts.basicDetails.id === postId
+                })
+            }
+            if(index == null){
+                index = userPosts.findIndex((userPosts)=>{
+                    return userPosts.basicDetails.id === postId
+                })
+            }
+            if(index == null){
+                index = storyPosts.findIndex((storyPosts)=>{
+                    return storyPosts.basicDetails.id === postId
+                })
+            }
+            if(index == null){
+                index = videoPosts.findIndex((videoPosts)=>{
+                    return videoPosts.basicDetails.id === postId
+                })
+            }
+            if(index == null){
+                index = events.findIndex((events)=>{
+                    return events.basicDetails.id === postId
+                })
+            }
+            if(index == null){
+                index = articles.findIndex((articles)=>{
+                    return articles.basicDetails.id === postId
+                })
+            }
+            if(index == null){
+                index = channelPosts.findIndex((channelPosts)=>{
+                    return channelPosts.basicDetails.id === postId
+                })
+            }
+			if(index == null){
+				index = tips.find((tips)=>{
+					return tips.basicDetails.id === postId
+				})
+			}
+			
+			if(type === "Basic Text Post"){ 
+				userPosts[index].fileDeleted = true
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body" : userPosts}})
+			}
+			if(type === "Media Post"){ 
+				 userPosts[index].fileDeleted = true
+				 await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body" : userPosts}})
+			} 
+			if(type === "Video Post"){ 
+				 videoPosts[index].fileDeleted = true
+				 await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"video-posts"},{$set:{"body" : videoPosts}})
+			}
+			
+			if(type === "Article Post"){ 
+				 articles[index].fileDeleted = true
+				 await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"article-posts"},{$set:{"body" : articles}})
+			}
+			
+			if(type === "Channel Feed Post"){ 
+				 channelPosts[index].fileDeleted = true
+				 await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"channel-posts"},{$set:{"body" : channelPosts}})
+			}
+			
+			if(type === "Market Place Post"){ 
+				marketPlacePosts[index].fileDeleted = true
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"market-place-posts"},{$set:{"body" : marketPlacePosts}})
+			} 
+			if(type === "Business Post"){ 
+				businessPosts[index].fileDeleted = true
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"business-posts"},{$set:{"body" : businessPosts}})
+			}
+			if(type === "Story Post"){ 
+				storyPosts.push(post)
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"story-posts"},{$set:{"body" : storyPosts}})
+			}
+			if(type === "Group Post"){ 
+				groupPosts[index].fileDeleted = true
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"group-posts"},{$set:{"body" : groupPosts}})
+			}
+			if(type === "Religious Post"){ 
+				religiousPosts[index].fileDeleted = true
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"religous-posts"},{$set:{"body" : religiousPosts}})
+			}
+			if(type === "Event"){ 
+				events[index].fileDeleted = true
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"all-events"},{$set:{"body" : events}})
+			}
+			if(type === "Business Tip Of Day"){
+			    tips[index].fileDeleted = true
+			    await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"business-tips"},{$set:{"body":tips}})
+			}
+			
+			response.send(JSON.stringify({"status":"success"}))
+        }else{
+			response.sendStatus(404)
+		}
+    }catch{
+        response.send(JSON.stringify({"status":"server-error"}))
+    }
+})
+
+app.post("/upload-comment-reply", async(request,response)=>{
+	
+	try{
+		
+		let data = request.body 
+		
+		let input = data.comment
+		
+		let userId = input.ownerId 
+		
+		let businessId = input.businessId
+		
+		let postId = data.postId
+		
+		let socketCheck = await checkIfSocketActive(userId)
+		
+		const checkBlock = async(userId,businessId,comment)=>{
+			
+			let output = false
+			
+			let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"})
+			let getBusinesses = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-businesses"})
+			let getGroups = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-groups"})
+			
+			let users = getUsers.body 
+			let businesses = getBusinesses.body 
+			let groups = getGroups.body
+			
+			let ownerId = comment.ownerId 
+			
+			let businessIdx = comment.businessId
+			
+			if(businessId){
+				
+				let business = businesses.find((businesses)=>{
+					return businesses.businessId === businessIdx
+				})
+				
+				let settings = business.preferences
+				
+				let blockedUsers = settings.blockedUsers
+				
+				if(blockedUsers.includes(userId)){
+					output = true
+				}
+				
+			}else{
+				
+				let user = users.find((users)=>{
+					return users.userId === ownerId
+				})
+				
+				let settings = user.preferences
+				
+				let blockedUsers = settings.blockedUsers
+				let blockedBusinesses = settings.blockedBusinesses
+				
+				if(businessId){
+					if(blockedBusinesses.includes(businessId)){
+						output = true
+					}
+				}else{
+					if(blockedUsers.includes(userId)){
+						output = true
+					}
+				}
+				
+			}
+			
+			return output
+			
+		}
+			
+		if(socketCheck == true){
+			
+			var getBusinessPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"business-posts"}) 
+            var getUserPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-posts"})
+            var getChannelPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"channel-posts"})
+            var getArticlePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"article-posts"})
+            var getVideoPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"video-posts"})
+            var getReligiousPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"religious-posts"})
+            var getGroupPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"group-posts"})
+            var getStoryPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"story-posts"})
+            var getMarketPlacePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"market-place-posts"})
+            var getEvents = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"all-events"})
+            var getTips = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"business-tips"})
+            
+            
+            //extraction 
+            let businessPosts = getBusinessPosts.body  
+            let userPosts = getUserPosts.body
+            let channelPosts = getChannelPosts.body
+            let articles = getArticlePosts.body 
+            let videoPosts = getVideoPosts.body
+            let storyPosts = getStoryPosts.body
+            let groupPosts = getGroupPosts.body
+            let religiousPosts = getReligiousPosts.body
+            let marketPlacePosts = getMarketPlacePosts.body
+            let events = getEvents.body
+            let tips = getTips.body
+			
+			let responseOutput = "success"
+			
+			let searchOne = businessPosts.find((businessPosts)=>{
+				return businessPosts.basicDetails.id === postId
+			})
+			let searchTwo = userPosts.find((userPosts)=>{
+				return userPosts.basicDetails.id === postId
+			})
+			let searchThree = channelPosts.find((channelPosts)=>{
+				return channelPosts.basicDetails.id === postId
+			})
+			let searchFour = articles.find((articles)=>{
+				return articles.basicDetails.id === postId
+			})
+			let searchFive = videoPosts.find((videoPosts)=>{
+				return videoPosts.basicDetails.id === postId
+			})
+			let searchSix = storyPosts.find((storyPosts)=>{
+				return storyPosts.basicDetails.id === postId
+			})
+			let searchSeven = groupPosts.find((groupPosts)=>{
+				return groupPosts.basicDetails.id === postId
+			})
+			let searchEight = religiousPosts.find((religiousPosts)=>{
+				return religiousPosts.basicDetails.id === postId
+			})
+			let searchNine = marketPlacePosts.find((marketPlacePosts)=>{
+				return marketPlacePosts.basicDetails.id === postId
+			})
+			let searchTen = events.find((events)=>{
+				return events.basicDetails.id === postId
+			})
+			let searchEleven = tips.find((tips)=>{
+				return tips.basicDetails.id === postId
+			})
+			
+			
+			
+			if(searchOne){
+				
+				let bd = searchOne.basicDetails 
+				let comments = bd.comments
+				let i = comments.findIndex(()=>{
+					return comments.id === input.originalComment.id
+				})
+				
+				if(checkBlock(userId,businessId,comments[i]) == false){
+
+					comments[i].replies.push(input)
+					
+					await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"business-posts"},{$set:{"body":businessPosts}}) 
+					
+				}else{
+					responseOutput = "blocked"
+				}
+			}
+			if(searchTwo){
+				
+				let bd = searchOne.basicDetails 
+				let comments = bd.comments
+				let i = comments.findIndex(()=>{
+					return comments.id === input.originalComment.id
+				})
+				
+				if(checkBlock(userId,businessId,comments[i]) == false){
+				
+					comments[i].replies.push(input)
+					
+					await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body":userPosts}})
+					
+				}else{
+					responseOutput = "blocked"
+				}
+			}
+			if(searchThree){
+				
+				let bd = searchOne.basicDetails 
+				let comments = bd.comments
+				let i = comments.findIndex(()=>{
+					return comments.id === input.originalComment.id
+				})
+				
+				if(checkBlock(userId,businessId,comments[i]) == false){
+				
+					comments[i].replies.push(input)
+					
+					await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"channel-posts"},{$set:{"body":channelPosts}})
+					
+				}else{
+					responseOutput = "blocked"
+				}
+			
+			}
+			if(searchFour){
+				
+				let bd = searchOne.basicDetails 
+				let comments = bd.comments
+				let i = comments.findIndex(()=>{
+					return comments.id === input.originalComment.id
+				})
+				
+				if(checkBlock(userId,businessId,comments[i]) == false){
+					
+					comments[i].replies.push(input)
+					
+					await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"article-posts"},{$set:{"body":articles}})
+				
+				}else{
+					responseOutput = "blocked"
+				}
+			}
+			if(searchFive){
+				
+				let bd = searchOne.basicDetails 
+				let comments = bd.comments
+				let i = comments.findIndex(()=>{
+					return comments.id === input.originalComment.id
+				})
+				
+				if(checkBlock(userId,businessId,comments[i]) == false){
+					
+					comments[i].replies.push(input)
+					
+					await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"video-posts"},{$set:{"body":videoPosts}})
+				
+				}else{
+					responseOutput = "blocked"
+				}
+			}
+			if(searchSix){
+				
+				let bd = searchOne.basicDetails 
+				let comments = bd.comments
+				let i = comments.findIndex(()=>{
+					return comments.id === input.originalComment.id
+				})
+				
+				if(checkBlock(userId,businessId,comments[i]) == false){
+					
+					comments[i].replies.push(input)
+					
+					await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"story-posts"},{$set:{"body":storyPosts}})
+				
+				}else{
+					responseOutput = "blocked"
+				}
+			}
+			if(searchSeven){
+				
+				let bd = searchOne.basicDetails 
+				let comments = bd.comments
+				let i = comments.findIndex(()=>{
+					return comments.id === input.originalComment.id
+				})
+				
+				if(checkBlock(userId,businessId,comments[i]) == false){
+					
+					comments[i].replies.push(input)
+					
+					await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"group-posts"},{$set:{"body":groupPosts}})
+				
+				}else{
+					responseOutput = "blocked"
+				}
+			}
+			if(searchEight){
+				
+				let bd = searchOne.basicDetails 
+				let comments = bd.comments
+				let i = comments.findIndex(()=>{
+					return comments.id === input.originalComment.id
+				})
+				
+				if(checkBlock(userId,businessId,comments[i]) == false){
+					
+					comments[i].replies.push(input)
+					
+					await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"religious-posts"},{$set:{"body":religiousPosts}})
+				
+				}else{
+					responseOutput = "blocked"
+				}
+			}
+			if(searchNine){
+				
+				let bd = searchOne.basicDetails 
+				let comments = bd.comments
+				let i = comments.findIndex(()=>{
+					return comments.id === input.originalComment.id
+				})
+				
+				if(checkBlock(userId,businessId,comments[i]) == false){
+					
+					comments[i].replies.push(input)
+					
+					await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"market-place-posts"},{$set:{"body":marketPlacePosts}})
+					
+				}else{
+					responseOutput = "blocked"
+				}
+				
+			}
+			if(searchTen){
+				
+				let bd = searchOne.basicDetails 
+				let comments = bd.comments
+				let i = comments.findIndex(()=>{
+					return comments.id === input.originalComment.id
+				})
+				
+				if(checkBlock(userId,businessId,comments[i]) == false){
+					
+					comments[i].replies.push(input)
+					
+					await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"all-events"},{$set:{"body":events}})
+					
+				}else{
+					responseOutput = "blocked"
+				}
+				
+			}
+			if(searchEleven){
+				
+				let bd = searchOne.basicDetails 
+				let comments = bd.comments
+				let i = comments.findIndex(()=>{
+					return comments.id === input.originalComment.id
+				})
+				
+				if(checkBlock(userId,businessId,comments[i]) == false){
+					
+					comments[i].replies.push(input)
+					
+					await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"business-tips"},{$set:{"body":tips}})
+					
+				}else{
+					responseOutput = "blocked"
+				}
+				
+			}
+			
+			response.send(JSON.stringify({"status":responseOutput}))
+			
+		}else{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+		
+	}catch{
+		response.send(JSON.stringify({"status":"server-error"}))
+	}
+	
+})
+
+app.post("/find-post" , async(request,response)=>{
+    try{
+        let data = request.body
+        let userId = data.accessorId
+        let postId = data.postId
          
         
 		let socketCheck = await checkIfSocketActive(userId)
@@ -2514,70 +3331,70 @@ app.post("/find-post" , async(request,response)=>{
             })
             if(index == null){
                 index = marketPlacePosts.findIndex((marketPlacePosts)=>{
-                    return marketPlacePosts.basicDetails.id === post.basicDetails.id
+                    return marketPlacePosts.basicDetails.id === postId
                 })
             }else{
 				type = "business posts"
 			}
             if(index == null){
                 index = religiousPosts.findIndex((religiousPosts)=>{
-                    return religiousPosts.basicDetails.id === post.basicDetails.id
+                    return religiousPosts.basicDetails.id === postId
                 })
             }else{
 				type = "market place posts"
 			}
             if(index == null){
                 index = groupPosts.findIndex((groupPosts)=>{
-                    return groupPosts.basicDetails.id === post.basicDetails.id
+                    return groupPosts.basicDetails.id === postId
                 })
             }else{
 				type = "religious posts"
 			}
             if(index == null){
                 index = userPosts.findIndex((userPosts)=>{
-                    return userPosts.basicDetails.id === post.basicDetails.id
+                    return userPosts.basicDetails.id === postId
                 })
             }else{
 				type = "group posts"
 			}
             if(index == null){
                 index = storyPosts.findIndex((storyPosts)=>{
-                    return storyPosts.basicDetails.id === post.basicDetails.id
+                    return storyPosts.basicDetails.id === postId
                 })
             }else{
 				type = "user posts"
 			}
             if(index == null){
                 index = videoPosts.findIndex((videoPosts)=>{
-                    return videoPosts.basicDetails.id === post.basicDetails.id
+                    return videoPosts.basicDetails.id === postId
                 })
             }else{
 				type = "story posts"
 			}
             if(index == null){
                 index = events.findIndex((events)=>{
-                    return events.basicDetails.id === post.basicDetails.id
+                    return events.basicDetails.id === postId
                 })
             }else{
 				type = "video posts"
 			}
             if(index == null){
-                index = articles.findIndex(articles)=>{
-                    return articles.basicDetails.id === post.basicDetails.id
+                index = articles.findIndex((articles)=>{
+                    return articles.basicDetails.id === postId
                 })
             }else{
 				type = "events"
 			}
             if(index == null){
                 index = channelPosts.findIndex((channelPosts)=>{
-                    return channelPosts.basicDetails.id === post.basicDetails.id
+                    return channelPosts.basicDetails.id === postId
                 })
             }else{
 				type = "article posts"
 			}
 			if(index == null){
                 index = tips.findIndex((tips)=>{
-                    return tips.basicDetails.id === post.basicDetails.id
+                    return tips.basicDetails.id === postId
                 })
             }else{
 				type = "channel posts"
@@ -2655,6 +3472,7 @@ app.post("/comment-like-unlike" , async(request,response)=>{
             var getStoryPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"story-posts"})
             var getMarketPlacePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"market-place-posts"})
             var getEvents = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"all-events"})
+            var getTips = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"business-tips"})
             
             
             
@@ -2669,6 +3487,7 @@ app.post("/comment-like-unlike" , async(request,response)=>{
             let topicPosts = getTopicPosts.body
             let marketPlacePosts = getMarketPlacePosts.body
             let events = getEvents.body
+			let tips = getTips.body
             
         const Processor = (postId,userId,commentId,action)=>{
             let output = { 
@@ -2679,7 +3498,7 @@ app.post("/comment-like-unlike" , async(request,response)=>{
             if(type === "Basic Text Post"){ 
                 
                 let post = userPosts.findOne((userPosts)=>{
-                    return userPosts.id === postId
+                    return userPosts.basicDetails.id === postId
                 })
                 
                 if(post) {
@@ -2734,7 +3553,61 @@ app.post("/comment-like-unlike" , async(request,response)=>{
             }
             if(type === "Media Story Post"){ 
                  let post = userPosts.findOne((userPosts)=>{
-                    return userPosts.id === postId
+                    return userPosts.basicDetails.id === postId
+                })
+                
+                if(post) {
+                
+                    let comments = post.basicDetails.comments 
+                    
+                    let comment = comments.findOne((comments)=>{
+                        comments.id === commentId
+                    })
+                    
+                    if(comment){
+                        
+                        if(action === "like" || action === "unlike"){
+                            
+                            let likes = comment.likes
+                            let search = likes.includes(userId)
+                            if(search == true){
+                                let index = likes.indexOf(userId)
+                                likes.splice(index,1)
+                                output.status = "unlike"
+                                output.count = likes.length
+                            }else{
+                                
+                                likes.push(userId)
+                                output.status = "like"
+                                output.count = likes.length
+                            }
+                        }else{
+                            let likes = comment.dislikes
+                            let search = dislikes.includes(userId)
+                            if(search == true){
+                                let index = dislikes.indexOf(userId)
+                                dislikes.splice(index,1)
+                                output.status = "undislike"
+                                output.count = likes.length
+                            }else{
+                                
+                                dislikes.push(userId)
+                                output.status = "dislike"
+                                output.count = likes.length
+                            }
+                        }
+                        
+                    }else{
+                        output.status = "comment deleted"
+                    }
+                
+                }else{
+                    output.status = "post deleted"
+                }
+            } 
+			if(type === "Media Post"){ 
+                 let post = userPosts.findOne((userPosts)=>{
+                    return userPosts.basicDetails.id === postId
                 })
                 
                 if(post) {
@@ -2788,7 +3661,7 @@ app.post("/comment-like-unlike" , async(request,response)=>{
             } 
             if(type === "Video Post"){ 
                  let post = videoPosts.findOne((videoPosts)=>{
-                    return videoPosts.id === postId
+                    return videoPosts.basicDetails.id === postId
                 })
                 
                 if(post) {
@@ -2843,7 +3716,7 @@ app.post("/comment-like-unlike" , async(request,response)=>{
             
             if(type === "Article Post"){ 
                 let post = articlePosts.findOne((articlePosts)=>{
-                    return articlePosts.id === postId
+                    return articlePosts.basicDetails.id === postId
                 })
                 
                 if(post) {
@@ -2899,7 +3772,7 @@ app.post("/comment-like-unlike" , async(request,response)=>{
             if(type === "Channel Feed Post"){ 
                 let post = channelPosts.findOne((channelPosts)=>{
 
-                    return channelPosts.id === postId
+                    return channelPosts.basicDetails.id === postId
 
                 })
                 
@@ -2955,7 +3828,7 @@ app.post("/comment-like-unlike" , async(request,response)=>{
             
             if(type === "Market Place Post"){ 
                 let post = marketPlacePosts.findOne((marketPlacePosts)=>{
-                    return marketPlacePosts.id === postId
+                    return marketPlacePosts.basicDetails.id === postId
                 })
                 
                 if(post) {
@@ -3010,7 +3883,7 @@ app.post("/comment-like-unlike" , async(request,response)=>{
             if(type === "Business Post"){ 
                 let post = businessPosts.findOne((businessPosts)=>{
 
-                    return businessPosts.id === postId
+                    return businessPosts.basicDetails.id === postId
 
                 })
                 
@@ -3066,7 +3939,7 @@ app.post("/comment-like-unlike" , async(request,response)=>{
             if(type === "Story Post"){ 
                 let post = storyPosts.findOne((storyPosts)=>{
 
-                    return storyPosts.id === postId
+                    return storyPosts.basicDetails.id === postId
 
                 })
                 
@@ -3119,10 +3992,10 @@ app.post("/comment-like-unlike" , async(request,response)=>{
                     output.status = "post deleted"
                 }
             }
-            if(type === "Topic Post"){ 
-                let post = topicPosts.findOne((topicPosts)=>{
+            if(type === "Business Tip Of Day"){ 
+                let post = tips.findOne((tips)=>{
 
-                    return topicPosts.id === postId
+                    return tips.basicDetails.id === postId
 
                 })
                 
@@ -3178,7 +4051,63 @@ app.post("/comment-like-unlike" , async(request,response)=>{
             if(type === "Group Post"){ 
                 let post = groupPosts.findOne((groupPosts)=>{
 
-                    return groupPosts.id === postId
+                    return groupPosts.basicDetails.id === postId
+
+                })
+                
+                if(post) {
+                
+                    let comments = post.basicDetails.comments 
+                    
+                    let comment = comments.findOne((comments)=>{
+                        comments.id === commentId
+                    })
+                    
+                    if(comment){
+                        
+                        if(action === "like" || action == "unlike"){
+                            
+                            let likes = comment.likes
+                            let search = likes.includes(userId)
+                            if(search == true){
+                                let index = likes.indexOf(userId)
+                                likes.splice(index,1)
+                                output.status = "unlike"
+                                output.count = likes.length
+                            }else{
+                                
+                                likes.push(userId)
+                                output.status = "like"
+                                output.count = likes.length
+                            }
+                        }else{
+                            let likes = comment.dislikes
+                            let search = dislikes.includes(userId)
+                            if(search == true){
+                                let index = dislikes.indexOf(userId)
+                                dislikes.splice(index,1)
+                                output.status = "undislike"
+                                output.count = likes.length
+                            }else{
+                                
+                                dislikes.push(userId)
+                                output.status = "dislike"
+                                output.count = likes.length
+                            }
+                        }
+                        
+                    }else{
+                        output.status = "comment deleted"
+                    }
+                
+                }else{
+                    output.status = "post deleted"
+                }
+            }
+			if(type === "Event"){ 
+                let post = events.findOne((events)=>{
+
+                    return events.basicDetails.id === postId
 
                 })
                 
@@ -3247,6 +4176,10 @@ app.post("/comment-like-unlike" , async(request,response)=>{
              out = Processor(postId,userId,commentId,action)
              await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body" : userPosts}})
         } 
+		if(type === "Media Post"){ 
+             out = Processor(postId,userId,commentId,action)
+             await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body" : userPosts}})
+        }
         if(type === "Video Post"){ 
              out = Processor(postId,userId,commentId,action)
              await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"video-posts"},{$set:{"body" : videoPosts}})
@@ -3278,9 +4211,13 @@ app.post("/comment-like-unlike" , async(request,response)=>{
             groupPosts.push(post)
             await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"group-posts"},{$set:{"body" : groupPosts}})
         }
-        if(type === "Topic Post"){ 
+        if(type === "Business Tip Of Day"){ 
             topicPosts.push(post)
-            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"topic-posts"},{$set:{"body" : topicPosts}})
+            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"business-tips"},{$set:{"body" : tips}})
+        }
+		if(type === "Event"){ 
+            topicPosts.push(post)
+            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"all-events"},{$set:{"body" : events}})
         }
         
         
@@ -3299,6 +4236,11 @@ app.post("/upload-comment" , async(request,response)=>{
         if(data.originalComment != null){
             let commentId = data.originalComment
         }
+		
+		let output = { 
+            "status": null,
+            "count" : 0
+        }
         
         let postId = data.postId
         let type = data.type 
@@ -3312,6 +4254,8 @@ app.post("/upload-comment" , async(request,response)=>{
             var getGroupPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"group-posts"})
             var getStoryPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"story-posts"})
             var getMarketPlacePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"market-place-posts"})
+            var getTips = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"business-tips"})
+            var getEvents = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"all-events"})
             
             
             
@@ -3323,19 +4267,17 @@ app.post("/upload-comment" , async(request,response)=>{
             let videoPosts = getVideoPosts.body
             let storyPosts = getStoryPosts.body
             let groupPosts = getGroupPosts.body
-            let topicPosts = getTopicPosts.body
+            let tips = getTips.body
             let marketPlacePosts = getMarketPlacePosts.body
+            let events = getEvents.body
             
         const Processor = (postId,userId,commentId,action)=>{
-            let output = { 
-                "status": null,
-                "count" : 0
-            }
+            
             
             if(type === "Basic Text Post"){ 
                 
                 let post = userPosts.findOne((userPosts)=>{
-                    return userPosts.id === postId
+                    return userPosts.basicDetails.id === postId
                 })
                 
                 if(post) {
@@ -3370,7 +4312,42 @@ app.post("/upload-comment" , async(request,response)=>{
             }
             if(type === "Media Story Post"){ 
                  let post = userPosts.findOne((userPosts)=>{
-                    return userPosts.id === postId
+                    return userPosts.basicDetails.id === postId
+                })
+                
+                if(post) {
+                
+                    if(reply == true){
+                        
+                        let comments = post.basicDetails.comments 
+                        
+                        let comment = comments.findOne((comments)=>{
+                            comments.id === commentId
+                        })
+                        
+                        if(comment){
+                            
+                           replies.push(data)
+                            
+                        }else{
+                            output.status = "comment deleted"
+                        }
+                    
+                    }else{
+                        
+                        let comments = post.basicDetails.comments
+                        
+                        comments.push(data)
+                        
+                    }
+                
+                }else{
+                    output.status = "post deleted"
+                }
+            } 
+			if(type === "Media Post"){ 
+                 let post = userPosts.findOne((userPosts)=>{
+                    return userPosts.basicDetails.id === postId
                 })
                 
                 if(post) {
@@ -3405,7 +4382,7 @@ app.post("/upload-comment" , async(request,response)=>{
             } 
             if(type === "Video Post"){ 
                 let post = videoPosts.findOne((videoPosts)=>{
-                    return videoPosts.id === postId
+                    return videoPosts.basicDetails.id === postId
 				})
                 
                 if(post) {
@@ -3441,7 +4418,7 @@ app.post("/upload-comment" , async(request,response)=>{
             
             if(type === "Article Post"){ 
                 let post = articlePosts.findOne((articlePosts)=>{
-                    return articlePosts.id === postId
+                    return articlePosts.basicDetails.id === postId
                 })
                 
                 if(post) {
@@ -3478,7 +4455,7 @@ app.post("/upload-comment" , async(request,response)=>{
             if(type === "Channel Feed Post"){ 
                 let post = channelPosts.findOne((channelPosts)=>{
 
-                    return channelPosts.id === postId
+                    return channelPosts.basicDetails.id === postId
 
                 })
                 
@@ -3515,7 +4492,7 @@ app.post("/upload-comment" , async(request,response)=>{
             
             if(type === "Market Place Post"){ 
                 let post = marketPlacePosts.findOne((marketPlacePosts)=>{
-                    return marketPlacePosts.id === postId
+                    return marketPlacePosts.basicDetails.id === postId
                 })
                 
                 if(post) {
@@ -3551,7 +4528,7 @@ app.post("/upload-comment" , async(request,response)=>{
             if(type === "Business Post"){ 
                 let post = businessPosts.findOne((businessPosts)=>{
 
-                    return businessPosts.id === postId
+                    return businessPosts.basicDetails.id === postId
 
                 })
                 
@@ -3588,7 +4565,7 @@ app.post("/upload-comment" , async(request,response)=>{
             if(type === "Story Post"){ 
                 let post = storyPosts.findOne((storyPosts)=>{
 
-                    return storyPosts.id === postId
+                    return storyPosts.basicDetails.id === postId
 
                 })
                 
@@ -3622,10 +4599,10 @@ app.post("/upload-comment" , async(request,response)=>{
                     output.status = "post deleted"
                 }
             }
-            if(type === "Topic Post"){ 
-                let post = topicPosts.findOne((topicPosts)=>{
+            if(type === "Business Tip Of Day"){ 
+                let post = tips.findOne((tips)=>{
 
-                    return topicPosts.id === postId
+                    return tips.basicDetails.id === postId
 
                 })
                 
@@ -3662,7 +4639,44 @@ app.post("/upload-comment" , async(request,response)=>{
             if(type === "Group Post"){ 
                 let post = groupPosts.findOne((groupPosts)=>{
 
-                    return groupPosts.id === postId
+                    return groupPosts.basicDetails.id === postId
+
+                })
+                
+                if(post) {
+                
+                    if(reply == true){
+                        
+                        let comments = post.basicDetails.comments 
+                        
+                        let comment = comments.findOne((comments)=>{
+                            comments.id === commentId
+                        })
+                        
+                        if(comment){
+                            
+                           replies.push(data)
+                            
+                        }else{
+                            output.status = "comment deleted"
+                        }
+                    
+                    }else{
+                        
+                        let comments = post.basicDetails.comments
+                        
+                        comments.push(data)
+                        
+                    }
+                         
+                }else{
+                    output.status = "post deleted"
+                }
+            }
+			if(type === "Event"){ 
+                let post = events.findOne((events)=>{
+
+                    return events.basicDetails.id === postId
 
                 })
                 
@@ -3711,7 +4725,11 @@ app.post("/upload-comment" , async(request,response)=>{
         if(type === "Media Story Post"){ 
              out = Processor(postId,userId,commentId,action)
              await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body" : userPosts}})
-        } 
+        }
+		if(type === "Media Post"){ 
+             out = Processor(postId,userId,commentId,action)
+             await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body" : userPosts}})
+        }		
         if(type === "Video Post"){ 
              out = Processor(postId,userId,commentId,action)
              await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"video-posts"},{$set:{"body" : videoPosts}})
@@ -3740,14 +4758,17 @@ app.post("/upload-comment" , async(request,response)=>{
             await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"story-posts"},{$set:{"body" : storyPosts}})
         }
         if(type === "Group Post"){ 
-            groupPosts.push(post)
+            out = Processor(postId,userId,commentId,action)
             await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"group-posts"},{$set:{"body" : groupPosts}})
         }
-        if(type === "Topic Post"){ 
-            topicPosts.push(post)
-            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"topic-posts"},{$set:{"body" : topicPosts}})
+        if(type === "Business Tip Of Day"){ 
+            out = Processor(postId,userId,commentId,action)
+            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"business-tips"},{$set:{"body" : tips}})
         }
-        
+        if(type === "Event"){ 
+            out = Processor(postId,userId,commentId,action)
+            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"all-events"},{$set:{"body" : events}})
+        }
         
         response.send(JSON.stringify({"status":"success","data":out}))
         
@@ -3769,10 +4790,11 @@ app.post("/like-unlike" , async(request,response)=>{
             var getChannelPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"channel-posts"})
             var getArticlePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"article-posts"})
             var getVideoPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"video-posts"})
-            var getTopicPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"topic-posts"})
+            var getEvents = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"all-events"})
             var getGroupPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"group-posts"})
             var getStoryPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"story-posts"})
             var getMarketPlacePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"market-place-posts"})
+			var getTips = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"business-tips"})
             
             
             
@@ -3784,8 +4806,9 @@ app.post("/like-unlike" , async(request,response)=>{
             let videoPosts = getVideoPosts.body
             let storyPosts = getStoryPosts.body
             let groupPosts = getGroupPosts.body
-            let topicPosts = getTopicPosts.body
+            let tips = getTips.body
             let marketPlacePosts = getMarketPlacePosts.body
+            let events = getEvents.body
             
         const Processor = (postId,userId,commentId,action)=>{
             let output = { 
@@ -3796,7 +4819,7 @@ app.post("/like-unlike" , async(request,response)=>{
             if(type === "Basic Text Post"){ 
                 
                 let post = userPosts.findOne((userPosts)=>{
-                    return userPosts.id === postId
+                    return userPosts.basicDetails.id === postId
                 })
                 
                 if(post) {
@@ -3825,7 +4848,7 @@ app.post("/like-unlike" , async(request,response)=>{
             }
             if(type === "Media Story Post"){ 
                  let post = userPosts.findOne((userPosts)=>{
-                    return userPosts.id === postId
+                    return userPosts.basicDetails.id === postId
                 })
                 
                 if(post) {
@@ -3851,9 +4874,37 @@ app.post("/like-unlike" , async(request,response)=>{
                     output.status = "post deleted"
                 }
             } 
+			if(type === "Media Post"){ 
+                 let post = userPosts.findOne((userPosts)=>{
+                    return userPosts.basicDetails.id === postId
+                })
+                
+                if(post) {
+                
+                        if(action == "like"){
+                            
+                            let likes = post.likes
+                            let search = likes.includes(userId)
+                            if(search == true){
+                                let index = likes.indexOf(userId)
+                                likes.splice(index,1)
+                                output.status = "unlike"
+                                output.count = likes.length
+                            }else{
+                                
+                                likes.push(userId)
+                                output.status = "like"
+                                output.count = likes.length
+                            }
+                        }
+                
+                }else{
+                    output.status = "post deleted"
+                }
+            }
             if(type === "Video Post"){ 
                  let post = videoPosts.findOne((videoPosts)=>{
-                    return videoPosts.id === postId
+                    return videoPosts.basicDetails.id === postId
                 })
                 if(post) {
                 
@@ -3881,7 +4932,7 @@ app.post("/like-unlike" , async(request,response)=>{
             
             if(type === "Article Post"){ 
                 let post = articlePosts.findOne((articlePosts)=>{
-                    return articlePosts.id === postId
+                    return articlePosts.basicDetails.id === postId
                 })
                 
                 if(post) {
@@ -3911,7 +4962,7 @@ app.post("/like-unlike" , async(request,response)=>{
             if(type === "Channel Feed Post"){ 
                 let post = channelPosts.findOne((channelPosts)=>{
 
-                    return channelPosts.id === postId
+                    return channelPosts.basicDetails.id === postId
 
                 })
                 if(post) {
@@ -3940,7 +4991,7 @@ app.post("/like-unlike" , async(request,response)=>{
             
             if(type === "Market Place Post"){ 
                 let post = marketPlacePosts.findOne((marketPlacePosts)=>{
-                    return marketPlacePosts.id === postId
+                    return marketPlacePosts.basicDetails.id === postId
                 })
                 
                 if(post) {
@@ -3968,9 +5019,7 @@ app.post("/like-unlike" , async(request,response)=>{
             }
             if(type === "Business Post"){ 
                 let post = businessPosts.findOne((businessPosts)=>{
-
-                    return businessPosts.id === postId
-
+                    return businessPosts.basicDetails.id === postId
                 })
                 
                 if(post) {
@@ -4000,7 +5049,7 @@ app.post("/like-unlike" , async(request,response)=>{
             if(type === "Story Post"){ 
                 let post = storyPosts.findOne((storyPosts)=>{
 
-                    return storyPosts.id === postId
+                    return storyPosts.basicDetails.id === postId
 
                 })
                 
@@ -4030,7 +5079,67 @@ app.post("/like-unlike" , async(request,response)=>{
             if(type === "Group Post"){ 
                 let post = groupPosts.findOne((groupPosts)=>{
 
-                    return groupPosts.id === postId
+                    return groupPosts.basicDetails.id === postId
+
+                })
+                
+                if(post) {
+                
+                        if(action == "like"){
+                            
+                            let likes = post.likes
+                            let search = likes.includes(userId)
+                            if(search == true){
+                                let index = likes.indexOf(userId)
+                                likes.splice(index,1)
+                                output.status = "unlike"
+                                output.count = likes.length
+                            }else{
+                                
+                                likes.push(userId)
+                                output.status = "like"
+                                output.count = likes.length
+                            }
+                        }
+                
+                }else{
+                    output.status = "post deleted"
+                }
+            }
+			if(type === "Business Tip Of Day"){ 
+                let post = tips.findOne((tips)=>{
+
+                    return tips.basicDetails.id === postId
+
+                })
+                
+                if(post) {
+                
+                        if(action == "like"){
+                            
+                            let likes = post.likes
+                            let search = likes.includes(userId)
+                            if(search == true){
+                                let index = likes.indexOf(userId)
+                                likes.splice(index,1)
+                                output.status = "unlike"
+                                output.count = likes.length
+                            }else{
+                                
+                                likes.push(userId)
+                                output.status = "like"
+                                output.count = likes.length
+                            }
+                        }
+                
+                }else{
+                    output.status = "post deleted"
+                }
+            }
+			if(type === "Event"){ 
+                let post = events.findOne((events)=>{
+
+                    return events.basicDetails.id === postId
 
                 })
                 
@@ -4072,7 +5181,11 @@ app.post("/like-unlike" , async(request,response)=>{
         if(type === "Media Story Post"){ 
              out = Processor(postId,userId,commentId,action)
              await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body" : userPosts}})
-        } 
+        }
+		if(type === "Media Post"){ 
+             out = Processor(postId,userId,commentId,action)
+             await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body" : userPosts}})
+        }		
         if(type === "Video Post"){ 
              out = Processor(postId,userId,commentId,action)
              await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"video-posts"},{$set:{"body" : videoPosts}})
@@ -4104,9 +5217,469 @@ app.post("/like-unlike" , async(request,response)=>{
             groupPosts.push(post)
             await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"group-posts"},{$set:{"body" : groupPosts}})
         }
-        if(type === "Topic Post"){ 
+        if(type === "Business Tip Of Day"){ 
             topicPosts.push(post)
-            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"topic-posts"},{$set:{"body" : topicPosts}})
+            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"business-tips"},{$set:{"body" : tips}})
+        }
+		if(type === "Event"){ 
+            topicPosts.push(post)
+            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"all-events"},{$set:{"body" : events}})
+        }
+        
+        response.send(JSON.stringify({"status":"success","data":out}))
+        
+    }catch{
+        response.send(JSON.stringify({"status":"server-error"}))
+    }
+})
+
+app.post("/dislike-undislike" , async(request,response)=>{
+    try{
+        let data = request.body
+        let userId = data.userId 
+        let action = data.action
+        let postId = data.postId
+        let type = data.type 
+        
+            var getBusinessPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"business-posts"}) 
+            var getUserPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-posts"})
+            var getChannelPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"channel-posts"})
+            var getArticlePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"article-posts"})
+            var getVideoPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"video-posts"})
+            var getEvents = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"all-events"})
+            var getGroupPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"group-posts"})
+            var getStoryPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"story-posts"})
+            var getMarketPlacePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"market-place-posts"})
+			var getTips = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"business-tips"})
+            
+            
+            
+            //extraction 
+            let businessPosts = getBusinessPosts.body  
+            let userPosts = getUserPosts.body
+            let channelPosts = getChannelPosts.body
+            let articles = getArticlePosts.body 
+            let videoPosts = getVideoPosts.body
+            let storyPosts = getStoryPosts.body
+            let groupPosts = getGroupPosts.body
+            let tips = getTips.body
+            let marketPlacePosts = getMarketPlacePosts.body
+            let events = getEvents.body
+            
+        const Processor = (postId,userId,commentId,action)=>{
+            let output = { 
+                "status": null,
+                "count" : 0
+            }
+            
+            if(type === "Basic Text Post"){ 
+                
+                let post = userPosts.findOne((userPosts)=>{
+                    return userPosts.basicDetails.id === postId
+                })
+                
+                if(post) {
+                
+                        if(action == "dislike"){
+                            
+                            let dislikes = post.dislikes
+                            let search = dislikes.includes(userId)
+                            if(search == true){
+                                let index = likes.indexOf(userId)
+                                dislikes.splice(index,1)
+                                output.status = "undislike"
+                                output.count = likes.length
+                            }else{
+                                
+                                dislikes.push(userId)
+                                output.status = "dislike"
+                                output.count = likes.length
+                            }
+                        }
+                
+                }else{
+                    output.status = "post deleted"
+                }
+               
+            }
+            if(type === "Media Story Post"){ 
+                 let post = userPosts.findOne((userPosts)=>{
+                    return userPosts.basicDetails.id === postId
+                })
+                
+                if(post) {
+                
+                        if(action == "dislike"){
+                            
+                            let dislikes = post.dislikes
+                            let search = dislikes.includes(userId)
+                            if(search == true){
+                                let index = likes.indexOf(userId)
+                                dislikes.splice(index,1)
+                                output.status = "undislike"
+                                output.count = likes.length
+                            }else{
+                                
+                                dislikes.push(userId)
+                                output.status = "dislike"
+                                output.count = likes.length
+                            }
+                        }
+                
+                }else{
+                    output.status = "post deleted"
+                }
+            } 
+			if(type === "Media Post"){ 
+                 let post = userPosts.findOne((userPosts)=>{
+                    return userPosts.basicDetails.id === postId
+                })
+                
+                if(post) {
+                
+                        if(action == "dislike"){
+                            
+                            let dislikes = post.dislikes
+                            let search = dislikes.includes(userId)
+                            if(search == true){
+                                let index = likes.indexOf(userId)
+                                dislikes.splice(index,1)
+                                output.status = "undislike"
+                                output.count = likes.length
+                            }else{
+                                
+                                dislikes.push(userId)
+                                output.status = "dislike"
+                                output.count = likes.length
+                            }
+                        }
+                
+                }else{
+                    output.status = "post deleted"
+                }
+            }
+            if(type === "Video Post"){ 
+                 let post = videoPosts.findOne((videoPosts)=>{
+                    return videoPosts.basicDetails.id === postId
+                })
+                if(post) {
+                
+                        if(action == "dislike"){
+                            
+                            let dislikes = post.dislikes
+                            let search = dislikes.includes(userId)
+                            if(search == true){
+                                let index = likes.indexOf(userId)
+                                dislikes.splice(index,1)
+                                output.status = "undislike"
+                                output.count = likes.length
+                            }else{
+                                
+                                dislikes.push(userId)
+                                output.status = "dislike"
+                                output.count = likes.length
+                            }
+                        }
+                
+                }else{
+                    output.status = "post deleted"
+                }
+            }
+            
+            if(type === "Article Post"){ 
+                let post = articlePosts.findOne((articlePosts)=>{
+                    return articlePosts.basicDetails.id === postId
+                })
+                
+                if(post) {
+                
+                        if(action == "dislike"){
+                            
+                            let dislikes = post.dislikes
+                            let search = dislikes.includes(userId)
+                            if(search == true){
+                                let index = likes.indexOf(userId)
+                                dislikes.splice(index,1)
+                                output.status = "undislike"
+                                output.count = likes.length
+                            }else{
+                                
+                                dislikes.push(userId)
+                                output.status = "dislike"
+                                output.count = likes.length
+                            }
+                        }
+                
+                }else{
+                    output.status = "post deleted"
+                }
+            }
+            
+            if(type === "Channel Feed Post"){ 
+                let post = channelPosts.findOne((channelPosts)=>{
+
+                    return channelPosts.basicDetails.id === postId
+
+                })
+                if(post) {
+                
+                        if(action == "dislike"){
+                            
+                            let dislikes = post.dislikes
+                            let search = dislikes.includes(userId)
+                            if(search == true){
+                                let index = likes.indexOf(userId)
+                                dislikes.splice(index,1)
+                                output.status = "undislike"
+                                output.count = likes.length
+                            }else{
+                                
+                                dislikes.push(userId)
+                                output.status = "dislike"
+                                output.count = likes.length
+                            }
+                        }
+                
+                }else{
+                    output.status = "post deleted"
+                }
+            }
+            
+            if(type === "Market Place Post"){ 
+                let post = marketPlacePosts.findOne((marketPlacePosts)=>{
+                    return marketPlacePosts.basicDetails.id === postId
+                })
+                
+                if(post) {
+                
+                        if(action == "dislike"){
+                            
+                            let dislikes = post.dislikes
+                            let search = dislikes.includes(userId)
+                            if(search == true){
+                                let index = likes.indexOf(userId)
+                                dislikes.splice(index,1)
+                                output.status = "undislike"
+                                output.count = likes.length
+                            }else{
+                                
+                                dislikes.push(userId)
+                                output.status = "dislike"
+                                output.count = likes.length
+                            }
+                        }
+                
+                }else{
+                    output.status = "post deleted"
+                }
+            }
+            if(type === "Business Post"){ 
+                let post = businessPosts.findOne((businessPosts)=>{
+
+                    return businessPosts.basicDetails.id === postId
+
+                })
+                
+                if(post) {
+                
+                        if(action == "dislike"){
+                            
+                            let dislikes = post.dislikes
+                            let search = dislikes.includes(userId)
+                            if(search == true){
+                                let index = likes.indexOf(userId)
+                                dislikes.splice(index,1)
+                                output.status = "undislike"
+                                output.count = likes.length
+                            }else{
+                                
+                                dislikes.push(userId)
+                                output.status = "dislike"
+                                output.count = likes.length
+                            }
+                        }
+                
+                }else{
+                    output.status = "post deleted"
+                }
+                
+            }
+            if(type === "Story Post"){ 
+                let post = storyPosts.findOne((storyPosts)=>{
+                    return storyPosts.basicDetails.id === postId
+                })
+                
+                                if(post) {
+                
+                        if(action == "dislike"){
+                            
+                            let dislikes = post.dislikes
+                            let search = dislikes.includes(userId)
+                            if(search == true){
+                                let index = likes.indexOf(userId)
+                                dislikes.splice(index,1)
+                                output.status = "undislike"
+                                output.count = likes.length
+                            }else{
+                                
+                                dislikes.push(userId)
+                                output.status = "dislike"
+                                output.count = likes.length
+                            }
+                        }
+                
+                }else{
+                    output.status = "post deleted"
+                }
+            }
+            if(type === "Group Post"){ 
+                let post = groupPosts.findOne((groupPosts)=>{
+
+                    return groupPosts.basicDetails.id === postId
+
+                })
+                
+                if(post) {
+                
+                        if(action == "dislike"){
+                            
+                            let dislikes = post.dislikes
+                            let search = dislikes.includes(userId)
+                            if(search == true){
+                                let index = likes.indexOf(userId)
+                                dislikes.splice(index,1)
+                                output.status = "undislike"
+                                output.count = likes.length
+                            }else{
+                                
+                                dislikes.push(userId)
+                                output.status = "dislike"
+                                output.count = likes.length
+                            }
+                        }
+                
+                }else{
+                    output.status = "post deleted"
+                }
+            }
+			if(type === "Business Tip Of Day"){ 
+                let post = tips.findOne((tips)=>{
+
+                    return tips.basicDetails.id === postId
+
+                })
+                
+                if(post) {
+                
+                        if(action == "dislike"){
+                            
+                            let dislikes = post.dislikes
+                            let search = dislikes.includes(userId)
+                            if(search == true){
+                                let index = likes.indexOf(userId)
+                                dislikes.splice(index,1)
+                                output.status = "undislike"
+                                output.count = likes.length
+                            }else{
+                                
+                                dislikes.push(userId)
+                                output.status = "dislike"
+                                output.count = likes.length
+                            }
+                        }
+                
+                }else{
+                    output.status = "post deleted"
+                }
+            }
+			if(type === "Event"){ 
+                let post = events.findOne((events)=>{
+
+                    return events.basicDetails.id === postId
+
+                })
+                
+                if(post) {
+                
+                        if(action == "dislike"){
+                            
+                            let dislikes = post.dislikes
+                            let search = dislikes.includes(userId)
+                            if(search == true){
+                                let index = likes.indexOf(userId)
+                                dislikes.splice(index,1)
+                                output.status = "undislike"
+                                output.count = likes.length
+                            }else{
+                                
+                                dislikes.push(userId)
+                                output.status = "dislike"
+                                output.count = likes.length
+                            }
+                        }
+                
+                }else{
+                    output.status = "post deleted"
+                }
+            }
+            
+            return output
+
+        }
+         
+         
+        let out;
+        
+        if(type === "Basic Text Post"){ 
+            out = Processor(postId,userId,commentId,action)
+            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body" : userPosts}})
+        }
+        if(type === "Media Story Post"){ 
+             out = Processor(postId,userId,commentId,action)
+             await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body" : userPosts}})
+        }
+		if(type === "Media Post"){ 
+             out = Processor(postId,userId,commentId,action)
+             await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body" : userPosts}})
+        }		
+        if(type === "Video Post"){ 
+             out = Processor(postId,userId,commentId,action)
+             await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"video-posts"},{$set:{"body" : videoPosts}})
+        }
+        
+        if(type === "Article Post"){ 
+             out = Processor(postId,userId,commentId,action)
+             await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"article-posts"},{$set:{"body" : articlePosts}})
+        }
+        
+        if(type === "Channel Feed Post"){ 
+             out = Processor(postId,userId,commentId,action)
+             await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"channel-posts"},{$set:{"body" : channelPosts}})
+        }
+        
+        if(type === "Market Place Post"){ 
+            out = Processor(postId,userId,commentId,action)
+            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"market-place-posts"},{$set:{"body" : marketPlacePosts}})
+        } 
+        if(type === "Business Post"){ 
+            out = Processor(postId,userId,commentId,action)
+            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"business-posts"},{$set:{"body" : businessPosts}})
+        }
+        if(type === "Story Post"){ 
+            out = Processor(postId,userId,commentId,action)
+            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"story-posts"},{$set:{"body" : storyPosts}})
+        }
+        if(type === "Group Post"){ 
+            groupPosts.push(post)
+            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"group-posts"},{$set:{"body" : groupPosts}})
+        }
+        if(type === "Business Tip Of Day"){ 
+            topicPosts.push(post)
+            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"business-tips"},{$set:{"body" : tips}})
+        }
+		if(type === "Event"){ 
+            topicPosts.push(post)
+            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"all-events"},{$set:{"body" : events}})
         }
         
         response.send(JSON.stringify({"status":"success","data":out}))
@@ -5234,17 +6807,50 @@ app.get("/delete-business-data/:id", async(request,response)=>{
     }
 }) 
 
+function checkBlock(account,id){
+    let output = false 
+    
+    let blockedUsers;
+    let blockedBusinesses;
+    
+    if(account.classType == "Business"){
+        blockedUsers = account.preferences.blockedUsers
+        blockedBusinesses = account.preferences.blockedBusinesses
+    }else{
+        blockedUsers = account.preferences.blockedUsers
+    }
+    
+    let search1 = blockedUsers.includes(id)
+    let search2 = null;
+    if(blockedBusinesses){
+        search2 = blockedBusinesses.includes(id)
+    }else{
+        search2 = false
+    }
+    
+    if(search1 || search2){
+        output = true
+    }
+    
+    return output
+}
+
 app.post("/check-conversation-existence", async(request,response)=>{
 	    
 		try{
 			let output = null
 	    
 			let data = request.body
-			
+		
 			let accessorId = data.accessorId 
-			let businessId = null
 			
-			let socketCheck = checkIfSocketActive(accessorId)
+			let socketCheck = await checkIfSocketActive(accessorId)
+			
+			let conversations1;
+			let conversations2;
+			let sender;
+			let reciever;
+			
 			
 			if(socketCheck == true){
 				
@@ -5253,49 +6859,76 @@ app.post("/check-conversation-existence", async(request,response)=>{
 					"reciever":"none"
 				}
 				
-				if(data.businessId){
-					businessId = data.businessId
-				}
-				
 				let recieverId = data.recieverId 
 				let senderId = data.senderId
 				
 				//get database data
 				
 				let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"})
-				let users = getUsers.body 
-				
-				let getBusinesses = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"business"})
-				
+    			let getBusinesses = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-businesses"})
+    			let users = getUsers.body
+    			let businesses = getBusinesses.body
+			
 				//find sender and reciever
-				let sender = users.find((users)=>{
+				//If sender is user
+				sender = users.find((users)=>{
 					return users.userId === senderId
 				})
-				let conversations1 = sender.conversations 
-
-				let reciever = users.find((users)=>{
-					return users.userId === recieverId
-				})
-				let conversations2 = reciever.conversations 
-				
-				//check sender conversations 
-				let check1 = conversations1.find((conversations1)=>{
-					return conversations1.recieverId === reciever
-				})
-				
-				//check reciever conversations
-				let check2 = conversations2.find((conversations2)=>{
-					return conversations2.recieverId === sender
-				})
-				
-				if(check1){
-					output.sender = "exists"
+				if(!sender){
+    				//If sender is business
+    				sender = businesses.find((businesses)=>{
+    				    return businesses.businessId === senderId
+    				})
 				}
-				if(check2){
-					output.reciever = "exists"
+				//If reciever is user
+				reciever = users.find((users)=>{
+				    users.userId === recieverId
+				})
+				if(!reciever){
+    				//If reciever is business
+    				reciever = businesses.find((businesses)=>{
+    				    businesses.businessId === recieverId
+    				})
 				}
 				
-				response.send(JSON.stringify({"status": "success" , "output" : output}))
+				
+				if(checkBlock(reciever,senderId) == true){
+    				
+    				conversations1 = sender.conversations 
+    
+    				conversations2 = reciever.conversations 
+    				
+    				//check sender conversations 
+    				let check1 = conversations1.find((conversations1)=>{
+    					return conversations1.recieverId === recieverId
+    				})
+    				
+    				//check reciever conversations
+    				let check2 = conversations2.find((conversations2)=>{
+    					return conversations2.recieverId === senderId
+    				})
+    				
+    				if(check1){
+    				    if(check1.closed == true){
+    					    output.sender = "closed"
+    				    }else{
+    				        output.sender = "exists"
+    				    }
+    				}
+    				if(check2){
+    					if(check2.closed == true){
+    					    output.sender = "closed"
+    				    }else{
+    				        output.sender = "exists"
+    				    }
+    				}
+    				
+    				response.send(JSON.stringify({"status": "success" , "output" : output}))
+    			
+				}else{
+				    output.reciever = "blocked"
+				    response.send(JSON.stringify({"status": "success" , "output" : output}))
+				}
 			
 			}else{
 				response.sendStatus(404)
@@ -5823,7 +7456,7 @@ app.post("/check-conversation-existence", async(request,response)=>{
 			if(
 				time.date == serverTime.date &&
 				time.month == serverTime.month &&
-				time.year == serverTime.year &&
+				time.year == serverTime.year 
 			){
 				response.send(JSON.stringify({"status":"success"}))
 			}else{
@@ -6128,7 +7761,7 @@ app.post("/check-conversation-existence", async(request,response)=>{
 				businessId = data.businessId
 			}
 			
-			let output {
+			let output = {
 				"sender":null,
 				"reciever":null
 			};
@@ -6315,7 +7948,7 @@ app.post("/check-conversation-existence", async(request,response)=>{
 	async function keywordFind(keywords,input){
 	    let output = false 
 	    
-	    for(var i=0,keywords.length; i++){
+	    for(var i=0;i<keywords.length; i++){
 	        let x = keywords[i]
 	        let r = x.toRegex()
 	        let t = r.matches(input)
@@ -6416,6 +8049,72 @@ app.post("/check-conversation-existence", async(request,response)=>{
 	    }
 	})
 	
+	app.post("/update-playlist", async(request,response)=>{
+		try{
+			
+			let data = request.body 
+			
+			let accessorId = data.accessorId 
+			
+			let playlist = data.playlist 
+			
+			let socketCheck = await checkIfSocketActive(accessorId)
+			
+			if(socketCheck == true){
+				
+				let getPlaylists = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-playlists"})
+				let playlists = getPlaylists.body
+				
+				let index = playlists.findIndex((playlists)=>{
+					return playlists.id === playlist.id
+				})
+				
+				playlists[index] = playlist
+				
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-playlists"},{$set:{"body":playlists}})
+				
+				response.send(JSON.stringify({"status":"success"}))
+				
+			}else{
+				response.sendStatus(404)
+			}
+			
+		}catch{
+			response.send(JSON.stringify({
+				"status":"server-error"
+			}))
+		}
+	})
+	
+	app.post("/upload-playlist", async(request,response)=>{
+		try{
+			
+			let data = request.body 
+			
+			let accessorId = data.accessorId 
+			
+			let socketCheck = await checkIfSocketActive(accessorId)
+			
+			if(socketCheck == true){
+				
+				let getPlaylists = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-playlists"})
+				let playlists = getPlaylists.body
+				
+				playlists.push(data.playlist)
+				
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-playlists"},{$set:{"body":playlists}})
+				
+				response.send(JSON.stringify({"status":"success"}))
+				
+			}else{
+				response.sendStatus(404)
+			}
+			
+		}catch{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+	})
+	
 	app.post("/search-playlists", async(request,response)=>{
 	    try{
 	        let data = request.body
@@ -6425,8 +8124,9 @@ app.post("/check-conversation-existence", async(request,response)=>{
 	        
 	        if(socketCheck == true){
 	            
-	            let playlists = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-playlists"})
-	            let filtered = await filterPlaylists(playlists.body,input)
+	            let getPlaylists = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-playlists"})
+	            let playlists = getPlaylists.body
+				let filtered = await filterPlaylists(playlists.body,input)
 	            response.send(JSON.stringify({"status":"success","data":filtered}))
 	            
 	            
@@ -6613,8 +8313,9 @@ app.post("/check-conversation-existence", async(request,response)=>{
 				    response.pipe(readStream)
 				})
 				
-				when(readStream.ended() == true){
+				while(readStream.ended() == true){
 				    response.end("Completed")
+					break
 				}
 				
 			}
@@ -6623,7 +8324,443 @@ app.post("/check-conversation-existence", async(request,response)=>{
 		}
 	})
 	
+	app.post("/get-users-by-country/:id",async(request,response)=>{
+	    try{
+	        let userId = request.params.id 
+	        let check = await checkIfSocketActive(userId)
+	        if(check == true){
+	            let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"})
+	            let users = getUsers.body 
+	            let countrySorted = await sortForCountry(users,request.body.country)
+	            response.send(JSON.stringify({"status":"success","data":countrySorted}))
+	        }else{
+	            response.sendStatus(404)
+	        }
+	    }catch{
+	        response.send(JSON.stringify({"status":"server-error"}))
+	    }
+	})
 	
-	setInterval(cleanUpStories(),1000*60*5)
+	const sortForCountry = async(data,country)=>{
+	    for(var i= 0; i<data.length; i++){
+	        let x = data[i]
+	        if(x.addressDetails.country != country){
+	            data.splice(i,1)
+	        }
+	    }
+	    return data
+	}
+	
+	const sortForOccupation = async(data,occupationSorted)=>{
+	    for(var i= 0; i<data.length; i++){
+	        let x = data[i]
+	        if(x.occupation != occupation){
+	            data.splice(i,1)
+	        }
+	    }
+	    return data
+	}
+	
+	app.post("/get-users-by-occupation/:id",async(request,response)=>{
+	    try{
+	        let userId = request.params.id 
+	        let check = await checkIfSocketActive(userId)
+	        if(check == true){
+	            let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"})
+	            let users = getUsers.body 
+	            let occupationSorted = await sortForOccupation(users,request.body.occupation)
+	            response.send(JSON.stringify({"status":"success","data":occupationSorted}))
+	        }else{
+	            response.sendStatus(404)
+	        }
+	    }catch{
+	        response.send(JSON.stringify({"status":"server-error"}))
+	    }
+	})
+	
+	app.get("/get-leap-year", async(request,response)=>{
+		try{
+			
+			let data = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"leap-year-status"})
+			response.send(JSON.stringify({"status":data.status}))
+			
+		}catch{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+	
+	})
+	
+	const locateSingleUser = async(userId)=>{
+		let output = null
+		try{
+			
+			let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"})
+
+			let users = getUsers.body;
+			
+			let search = users.find((users)=>{
+				return users.userId === userId
+			})
+			
+			if(search){
+				output = search
+			}
+			
+		}catch{
+			output = null
+		}
+		return output
+	}
+
+	
+	async function extractPageFeedPosts(pages,array){
+		
+		try{
+			var getChannelPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"channel-posts"})
+			
+			let posts = getChannelPosts
+			
+			function findPosts(pageId){
+				for(var i=0; i<posts.length; i++){
+					let post = posts[i]
+					let details = post.basicDetails 
+					
+					if(details.businessId != null){
+						if(details.businessId === pageId){
+							array.push(post)
+						}
+					}
+				}
+			}
+			
+			for(var x=0; x<pages.length; x++){
+				let page = pages[x]
+				findPosts(page.businessId)
+			}
+		}catch{
+			
+		}
+		
+		return array 
+	}
+	
+	async function extractUserFeedPosts(users,array){
+		
+		try{
+			var getChannelPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"channel-posts"})
+			let posts = getChannelPosts
+			function findPosts(userId){
+				for(var i=0; i<posts.length; i++){
+					let post = posts[i]
+					let details = post.basicDetails 
+					if(details.ownerId != null){
+						if(details.ownerId === userId){
+							array.push(post)
+						}
+					}
+				}
+			}
+			for(var x=0; x<users.length; x++){
+				let user = users[x]
+				findPosts(user.userId)
+			}
+		}catch{
+			
+		}
+		
+		return array 
+	}
+	
+	app.post("/get-channel-feed-posts-by-user", async(request,response)=>{
+		try{
+			
+			let data = request.body;
+			
+			let socketCheck = await checkIfSocketActive(data.userId)
+			
+			if(socketCheck == true){
+				
+				let singleUser = await locateSingleUser(data.userId)
+				
+				let pages = singleUser.pagesFollowed
+				
+				let friends = singleUser.friends 
+				
+				let array = []
+				
+				let getFeeds = await extractPageFeedPosts(pages,array)
+				
+				let getUserFeeds = await extractUserFeedPosts(friends,getFeeds)
+				
+				response.send(JSON.stringify({"status":"success","data":getUserFeeds}))
+			
+			}else{
+				response.send(JSON.stringify({"status":"server-error"}))
+			}
+			
+		}catch{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+	})
+	
+	async function getFeedsFromFriends(friends,array){
+		
+		for(var i=0; i<friends.length; i++){
+			let xx = friends[i]
+			let locate = liveFeeds.find((liveFeeds)=>{
+				return liveFeeds.ownerId === xx
+			})
+			
+			if(locate){
+				array.push(locate)
+			}
+		}
+		
+		return array
+	}
+	
+	async function getFeedsFromPages(pages,array){
+		
+		for(var i=0; i<pages.length; i++){
+			let xx = pages[i]
+			let locate = liveFeeds.find((liveFeeds)=>{
+				return liveFeeds.ownerId === xx
+			})
+			
+			if(locate){
+				array.push(locate)
+			}
+		}
+		
+		return array
+	}
+	
+	app.post("/get-currently-live-feeds-by-user", async(request,response)=>{
+		try{
+			
+			let data = request.body;
+			
+			let userId = data.userId 
+			
+			let socketCheck = await checkIfSocketActive(userId)
+			
+			if(socketCheck == true){
+				
+				let singleUser = await locateSingleUser(data.userId)
+				
+				let pages = singleUser.pagesFollowed
+				
+				let friends = singleUser.friends 
+				let array = []
+				let friendFeeds = getFeedsFromFriends(friends,array)
+				let pageFeeds = getFeedsFromPages(pages,friendFeeds)
+				
+				response.send(JSON.stringify({"status":"success","data":pageFeeds}))
+				
+			}else{
+				response.sendStatus(404)
+			}
+			
+			
+		}catch{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+	})
+	
+	app.post("/get-fresh-admin-controller-data", async(request,response)=>{
+		try{
+			
+			let data = request.body 
+			let userId = data.userId
+			
+			let socketCheck = await checkIfSocketActive(userId)
+			if(socketCheck == true){
+				
+				let getController = await mongoClient.db("YEMPData").collection("AdminOnlyInfo").find({"name":"admin-controller-data"})
+				
+				let adminData = getController.body 
+				
+				response.send(JSON.stringify({"status":"success","data":adminData}))
+				
+			}else{
+				response.send(JSON.stringify({"status":"server-error"}))
+			}
+			
+		}catch{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+	})
+	
+	app.post("/get-fresh-admin-data", async(request,response)=>{
+		try{
+			
+			let data = request.body 
+			
+			let userId = data.userId 
+			let targetAdmin = data.targetAdmin
+			
+			let socketCheck = await checkIfSocketActive(userId)
+			
+			if(socketCheck == true){
+				
+				let getAdminController = await mongoClient.db("YEMPData").collection("AdminOnlyInfo").findOne({"name":"admin-controller-data"})
+				let adminData = getData.body
+			
+				let admins = adminData.admins 
+				
+				let admin = admins.find((admins)=>{
+					return admins.adminId === targetAdmin
+				})
+				
+				if(admin){
+					
+					response.send(JSON.stringify({"status":"success","data":admin}))
+					
+				}else{
+					response.send(JSON.stringify({"status":"error"}))
+				}
+				
+			}else{
+				response.send(JSON.stringify({"status":"server-error"}))
+			}
+			
+		}catch{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+	})
+	
+	setInterval(()=>{cleanUpStories()},1000*60*5)
+	
+	let verifications = []
+	
+	const codeGen = async()=>{
+		
+		let output = []
+		
+		let array = [0,1,2,3,4,5,6,7,8,9]
+		
+		for(var i=0; i<5; i++){
+			
+			array.shuffle()
+			
+			var x = array[i]
+			
+			output.push[x]
+			
+		}
+		
+		return `${output[0]}${output[1]}${output[2]}${output[3]}${output[4]}`
+		
+	}
+	
+	app.post("/generate-verification-code",async(request,response)=>{
+		
+		try{
+			
+			let data = request.body 
+			
+			let accessorId = data.accessorId 
+			
+			let socketCheck = await checkIfSocketActive(accessorId)
+			
+			if(socketCheck == true){
+				
+				let codeGen = await generateVerificationCode()
+				
+				let newCodeObj = {
+					"businessId":null,
+					"userId":null,
+					"code":codeGen,
+					"expired":false,
+					"serverTime": serverTime
+				}
+				
+				if(data.businessId){
+					newCodeObj.businessId = data.businessId
+				}else{
+					newCodeObj.userId = data.userId
+				}
+				
+				verifications.push(newCodeObj)
+				
+				response.send(JSON.stringify({"status":"success"}))
+				
+			}else{
+				response.send(JSON.stringify({"status":"server-error"}))
+			}
+			
+		}catch{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+		
+	})
+	
+	app.post("/verify-email-address", async(request,response)=>{
+		try{
+			
+			let data = request.body 
+			
+			let accessorId = data.accessorId 
+			
+			let check = await checkIfSocketActive(accessorId)
+			
+			if(check == true){
+				if(data.businessId){
+					let business = verifications.find((verifications)=>{
+						return verifications.businessId === data.businessId
+					})
+					if(business.code === data.code && business.expired != true){
+						response.send(JSON.stringify({"status":"success"}))
+					}else{
+						response.send(JSON.stringify({"status":"invalid"}))
+					}
+				}else{
+					let user  = verifications.find((verifications)=>{
+						return verifications.businessId === data.businessId
+					})
+					if(user.code === data.code && user.expired != true){
+						response.send(JSON.stringify({"status":"success"}))
+					}else{
+						response.send(JSON.stringify({"status":"invalid"}))
+					}
+				}
+			}else{
+				
+				response.sendStatus(404)
+				
+			}
+			
+		}catch{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+	})
+	
+	async function clearUpVerifications(){
+		
+		let currenthours = serverTime.hours
+		let currentmins = serverTime.mins
+		
+		for(var i=0; i<verifications.length; i++){
+			let v = verifications[i]
+			let hours = v.serverTime.hours
+			let mins = v.serverTime.mins
+			
+			if(currenthours == hours){
+				
+				let x = mins+20
+				
+				if(currentmins >= x){
+					v.expired = true
+				}
+				
+			}else{
+				v.expired == true
+			}
+			
+		}
+		
+	}
+
+	setInterval(clearUpVerifications,30000)
 
 server.listen(port)
