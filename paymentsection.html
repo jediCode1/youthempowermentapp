@@ -2,7 +2,7 @@
 <html>
 
 	<head>
-		<title> Shop Mate </title>
+		<title> Payment Portal </title>
 		<link href="stylesheet.css" rel="stylesheet"/>
 		<link href="Images/circle_logo.png" rel="icon"/>
 		<meta name="description" content="Payments">
@@ -26,6 +26,7 @@
 			<button id="startBtn">Make Payment</button>
 		
 		</div>
+		
 		<script src="node_modules/socket.io/client-dist/socket.io.js"></script>
 
 		<script src="https://www.paypal.com/sdk/js?client-id=ATGuAAoM45QuPR0UcEwq54WYtG-nlLl0LKzapqHlaQzeI8OxkkOdkvM7FPIBOe0RMZwshWoQHyAqiajg&components=buttons&currency=USD">
@@ -33,7 +34,8 @@
 		
 		<script>
 
-			var transferId;
+			let transferId;
+			let socket = io();
 			
 			const queryString = window.location.search;
             const urlParams = new URLSearchParams(queryString)
@@ -41,9 +43,11 @@
             let paymentData = null
             let userData = null
             
-            http://192.168.8.100:1994/process-payment/?id=${userProfile!!.userId}
             
-            let userId = urlParams.get("id")
+			let userId;
+			
+            userId = urlParams.get("id")
+			
             socket.emit("get-payment-data",{
                 "userId": userId
             })
@@ -156,7 +160,7 @@
 			let errorSequence = ()=>{
 			    socket.on("send-cash-transfer-status",{
 			        "refCode":paymentData.refCode,
-			        "status":"Cancelled"
+			        "status":"Error"
 			    })
 				setTimeout(()=>{
 					setTimeout(alert("Something went wrong trying to process your order. Please try again later."),1000)

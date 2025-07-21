@@ -9,27 +9,29 @@ const moveFile = import("move-file")
 import {Server} from 'socket.io'
 const uri = "mongodb://localhost:27017"
 import upload from 'express-fileupload'
-const fs = import('fs')
+import fetch from 'node-fetch'
+import fs from 'fs'
+import cors from 'cors';
+import {spawn} from "child_process";
+import {PassThrough} from "stream"
+
+const ffmpeg = import("fluent-ffmpeg")
 
 import { MongoClient } from 'mongodb'
  
  // Enable command monitoring for debugging
+/* 
 const mongoClient = new MongoClient('mongodb+srv://shopmatesales:N6Npa7vcMIaBULIS@cluster0.mgv7t.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0', { monitorCommands: true });
 mongoClient.connect()// Enable command monitoring for debugging
-/* 
+*/
 const mongoClient = new MongoClient(uri, { monitorCommands: true });
 mongoClient.connect()// Enable command monitoring for debugging
 //server calls management
-*/
 
 import express from 'express'
 
+
 const app = express()
-app.use(express.json({limit:"1mb"}));
-app.use(upload());
-app.use(express.static(__dirname));
-app.use(express.static(__dirname+'/Images'));
-app.use(express.static(__dirname+'/Assets'));
 
 const server = http.createServer(app)
 
@@ -38,6 +40,112 @@ const port = process.env.port || 1994
 const ss = import('socket.io-stream')
 
 const io = new Server(server)
+
+import getDimensions from 'get-video-dimensions';
+
+const tempDir = path.join(__dirname+"/TempHls")
+
+app.use(cors())
+app.use('/hls', express.static(tempDir))
+app.use(express.json({limit:"1mb"}));
+app.use(upload());
+app.use(express.static(__dirname));
+app.use(express.static(__dirname+'/Images'));
+app.use(express.static(__dirname+'/Assets'));
+
+let checkTempDir = fs.existsSync(tempDir)
+
+if (checkTempDir == false) {
+  fs.mkdirSync(tempDir);
+}
+
+function getVideoDimensions(filePath) {
+    return new Promise((resolve, reject) => {
+        ffmpeg.ffprobe(filePath, (err, metadata) => {
+            if (err){ 
+                return reject(err)
+            }
+            const videoStream = metadata.streams.find(stream => stream.codec_type === 'video');
+            if (!videoStream){
+                return reject(new Error('No video stream found'))
+            }else{
+                return resolve({
+                    width: videoStream.width,
+                    height: videoStream.height
+                });
+            }
+        });
+    });
+}
+
+async function checkVideoResolution(videoPath,index) {
+    var output = false
+    let resArray = [
+        144,
+        240,
+        360,
+        480,
+        720,
+        1080
+    ]
+    try {
+        const dimensions = await getVideoDimensions(videoPath);
+        const { width, height } = dimensions;
+        if (width == resArray[index] || height == resArray[index]) {
+            output = true;
+        } 
+    } catch (error) {
+        console.error('Error getting video dimensions:', error);
+    }
+    
+    return output
+}
+
+let streamKey = "audio";
+let playlist = path.join(tempDir, `${streamKey}.m3u8`);
+let ffmpegProcess = null;
+
+const startFFmpeg = () => {
+  if (ffmpegProcess) {
+    ffmpegProcess.kill("SIGINT");
+  }
+
+  const streamKey = "audio";
+  const playlist = path.join(tempDir, `${streamKey}.m3u8`);
+
+  ffmpegProcess = spawn("ffmpeg", [
+    "-f", "webm",
+    "-i", "pipe:0",
+    "-c:a", "aac",
+    "-b:a", "128k",
+    "-f", "hls",
+    "-hls_time", "6",
+    "-hls_segment_filename", path.join(tempDir, `${streamKey}_%03d.ts`),
+    playlist,
+  ]);
+
+  ffmpegProcess.stdout.on("data", (data) => {
+    console.log(`FFmpeg stdout: ${data}`);
+  });
+
+  ffmpegProcess.stderr.on("data", (data) => {
+    console.error(`FFmpeg stderr: ${data}`);
+  });
+
+  ffmpegProcess.on("error", (err) => {
+    console.error(`FFmpeg process error: ${err.message}`);
+    ffmpegProcess = null;
+  });
+
+  ffmpegProcess.on("close", (code) => {
+    console.log(`FFmpeg process exited with code ${code}`);
+    if (code !== 0) {
+      console.error(`FFmpeg process exited with non-zero code: ${code}`);
+    }
+    ffmpegProcess = null;
+    startFFmpeg();
+  });
+};
 
 
 //Date and time
@@ -185,14 +293,16 @@ async function timeProcessor(){
 
 setInterval(timeProcessor,1000)
 
-
 async function getActiveUsers(){
     let output = null 
     
     try{
-        
-        let getSockets = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-sockets"})
-        output = getSockets.body 
+		
+        let getLeapYear = mongoClient.db("YEMPData").collection("MainData").findOne({"name":"leap-year-status"})
+		if(getLeapYear.x == true){
+			let getSockets = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-sockets"})
+			output = getSockets.body 
+		}
         
     }catch{
         output = null
@@ -216,6 +326,7 @@ const activateUserSocket = async(userId)=>{
         return activeUsers.userId === userId
     })
     search.active = true
+    search.alreadyLoggedIn = true
 	
 	transferSocket.emit("recieve-active-user",{
 		"userId": search.userId
@@ -232,7 +343,10 @@ const addUserSocket = async(userId)=>{
         "active": true,
         "mediaId": null,
         "mediaFormat": null,
-        "currentConversation": null
+        "currentConversation": null,
+		"businessId":null,
+		"emailAddress":null,
+		"vidType":null
     }
     
     activeUsers.push(newObj)
@@ -281,9 +395,12 @@ const checkIfSocketActive = async(userId)=>{
     
     
     if(search){
-        if(search.active == true){
-            output = true
-        }
+		let getLeapYear = mongoClient.db("YEMPData").collection("MainData").findOne({"name":"leap-year-status"})
+		if(getLeapYear.x == true){			
+			if(search.active == true && search.alreadyLoggedIn == true){
+				output = true
+			}
+		}
     }
     
     return output
@@ -299,6 +416,21 @@ io.on("connection", (socket)=>{
 	
 	console.log("connected")
 	transferSocket = socket
+	
+	/*Sale update events*/
+	
+	//Business Posts and Market Place Posts
+	socket.on("sale-quantity-updated", (data)=>{
+        socket.emit("recieve-sale-quantity-update",data)
+    })
+    //Catalogue items
+    socket.on("catalogue-sale-quantity-updated",(data)=>{
+        socket.emit("recieve-catalogue-sale-quantity-updated",data)
+    })
+    //Event Posts 
+    socket.on("event-ticket-sale-update",(data)=>{
+        socket.emit("recieve-event-ticket-sale-update",data)
+    })
 	
 	/*Comment Update Calls*/
 	socket.on("comment-posted",async(data)=>{
@@ -354,8 +486,13 @@ io.on("connection", (socket)=>{
 	    }
 	})
 	
-	socket.on("send-cash-transfer-status",(data)=>{
-	    socket.emit("recieve-cash-transfer-status",data)
+	socket.on("send-cash-transfer-status",async(data)=>{
+	    let refCode = data.refCode 
+		let status = data.status 
+		let search = purchaseRequests.find((purchaseRequests)=>{
+			return purchaseRequests.refCode === refCode
+		})
+		search.status = status
 	})
 	
 	////////////<Video Call Requests>////////////
@@ -892,28 +1029,97 @@ io.on("connection", (socket)=>{
 	        conversations.id === id
 	    }) 
 	    
-	    conversation.messages.push(data.message)
 	    
 	    let conversations2 = reciever.conversations 
 	    
 	    let conversation2 = conversations2.find((conversations2)=>{
 	        conversations2.id === id
 	    }) 
+		if(conversations && conversation2){
+			
+			conversation.messages.push(data.message)
+			conversation2.messages.push(data.message)		
+			
+			socket.emit("recieve-fresh-conversation" , {
+				"senderId":userId, 
+				"recieverId":recieverId,
+				"conversation": conversation,
+				"conversation2": conversation2
+			})
+			
+			socket.emit("recieve-sent-confirmation",{
+				"senderId": userId, 
+				"recieverId": recieverId,
+				"messageId": data.message.id
+			})
+		}else{
+			let id_x = null
+			if(conversation2){
+				id_x = conversation2.id 
+				let newConversation = {
+					id: id_x,
+					senderId: userId,
+					recieverId: recieverId,
+					businessReciever:false,
+					businessSender:false,
+					messages :[],
+					opens:0,
+					dateCreated:conversation2.dateCreated,
+					dateModified: serverTime,
+					closed: Boolean = false
+				}
+				newConversation.messages.push(data.message)
+				conversation2.messages.push(data.message)	
+				user.conversations.push(newConversation)
+				
+				socket.emit("recieve-fresh-conversation" , {
+					"senderId":userId, 
+					"recieverId":recieverId,
+					"conversation": newConversation,
+					"conversation2": conversation2
+				})
+				
+				socket.emit("recieve-sent-confirmation",{
+					"senderId": userId, 
+					"recieverId": recieverId,
+					"messageId": data.message.id
+				})
+				
+			}else{
+				id_x = conversation.id 
+				let newConversation = {
+					id: id_x,
+					senderId: userId,
+					recieverId: recieverId,
+					businessReciever:false,
+					businessSender:false,
+					messages :[],
+					opens:0,
+					dateCreated:conversation.dateCreated,
+					dateModified: serverTime,
+					closed: Boolean = false
+				}
+				newConversation.messages.push(data.message)
+				conversation.messages.push(data.message)	
+				reciever.conversations.push(newConversation)
+				
+				socket.emit("recieve-fresh-conversation" , {
+					"senderId":userId, 
+					"recieverId":recieverId,
+					"conversation": conversation,
+					"conversation2": newConversation
+				})
+				
+				socket.emit("recieve-sent-confirmation",{
+					"senderId": userId, 
+					"recieverId": recieverId,
+					"messageId": data.message.id
+				})
+				
+			}
+			
+		}
 	    
-	    conversation2.messages.push(data.message)
-		
-	    socket.emit("recieve-fresh-conversation" , {
-	        "senderId":userId, 
-	        "recieverId":recieverId,
-	        "conversation": conversation,
-	        "conversation2": conversation2
-	    })
-		
-		socket.emit("recieve-sent-confirmation",{
-			"senderId": userId, 
-			"recieverId": recieverId,
-			"messageId": data.message.id
-		})
 	    
 	    await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-profiles"},{$set:{"body":users}})
 	    
@@ -1010,10 +1216,17 @@ io.on("connection", (socket)=>{
 	    let mediaId = data.mediaId
 	    let ownerId = data.ownerId
 	    let businessId = null 
+		let emailAddress = null
+		let vidType = null
 	    if(data.businessId){ 
 	        businessId = data.business
 	    }
-	    
+		if(data.emailAddress){
+			emailAddress = data.emailAddress
+		}
+	    if(data.vidType){
+			vidType = data.vidType
+		}
 	    
 	    let socket = getUserSocket(userId)
 
@@ -1023,6 +1236,12 @@ io.on("connection", (socket)=>{
         if(businessId){
             socket.businessId = businessId
         }
+		if(emailAddress){
+			socket.emailAddress = emailAddress
+		}
+		if(vidType){
+			socket.vidType = vidType
+		}
 	    
 	})
 	
@@ -1977,6 +2196,13 @@ app.get("/process-payment",async(request,response)=>{
         response.send(JSON.stringify({"status":"server-error"}))
     }
 })
+app.get("/",async(request,response)=>{
+    try{
+        response.sendFile(__dirname+"/downloadmenu.html") 
+    }catch{
+        response.send(JSON.stringify({"status":"server-error"}))
+    }
+})
 
 async function filterDeletedPosts(dataFeed){
 	
@@ -2267,6 +2493,203 @@ app.post("/upload-user-image/:id", async(request,response)=>{
     
 })
 
+async function convertVideo(path,userId,name){
+    try{
+        let outputDir = __dirname+`/User Data/${userId}/HLSPlaylists`
+        ffmpeg(path)
+        .outputOptions([
+            '-c:v h264', // Video codec (can be copied if compatible)
+            '-c:a aac',  // Audio codec (can be copied if compatible)
+            '-hls_time 10', // Target duration of each HLS segment in seconds
+            '-hls_list_size 0', // Keep all segments in the playlist (0 means unlimited)
+            '-hls_segment_filename', `${outputDir}/segment%03d.ts`, // Naming convention for segments
+            '-f hls' // Output format as HLS
+        ])
+        .output(`${outputDir}/${name}.m3u8`) // Main HLS playlist file
+        .on('start', function(commandLine) {
+            console.log(mediaId+'-Spawned FFmpeg with command: ' + commandLine);
+        })
+        .on('progress', function(progress) {
+            console.log(mediaId + '-Processing: ' + progress.percent + '% done');
+        })
+        .on('end', function() {
+            console.log(mediaId+'-Conversion finished successfully!');
+            fs.deleteFileSync(path)
+        })
+        .on('error', function(err) {
+            console.error(mediaId+'-Conversion process error');
+        })
+        .run();
+    }catch{
+        console.log(mediaId+"-server conversion error")
+    }
+}
+
+async function convertToDifferentResolutions(path,userId,businessId,name){
+    try{
+        
+        let paths = [
+            "144videos",
+            "240videos",
+            "360videos",
+            "480videos",
+            "720videos",
+            "1080videos"
+        ]
+        
+        let resLimit = 0
+        
+        let process = false 
+        
+        for(var i=0;i<5;i++){
+            if(checkVideoResolution(path,i) == false){
+                if(i != 0){
+                    resLimit = i-1
+                    process = true
+                    break
+                }
+            }
+        }
+        if(process == true){
+            for(var i=0; i<paths.length ; i++){
+                
+                let outputPath;
+				if(!businessId){
+                   outputPath =__dirname+`/User Data/${userId}/${paths[i]}`
+                }else{
+                    outputPath =__dirname+`/User Data/${userId}/Businesses/${businessId}/${paths[i]}`
+                };
+            
+                if(i == 0 && i <= resLimit){
+                    ffmpeg(path)
+                      .outputOptions([
+                        '-vf scale=-1:144' // Resizes to 144px height, maintaining aspect ratio
+                      ])
+                      .on('end', () => {
+                        console.log('Video conversion to 144px complete!');
+                      })
+                      .on('error', (err) => {
+                        console.error('Error during video conversion:', err);
+                      })
+                      .save(outputPath);
+                }else{
+                    break
+                }
+                if(i == 1 && i <= resLimit){
+                    ffmpeg(path)
+                      .outputOptions([
+                        '-vf scale=-1:240' // Resizes to 240px height, maintaining aspect ratio
+                      ])
+                      .on('end', () => {
+                        console.log('Video conversion to 240px complete!');
+                      })
+                      .on('error', (err) => {
+                        console.error('Error during video conversion:', err);
+                      })
+                      .save(outputPath);
+                }else{
+                    break
+                }
+                if(i == 2 && i <= resLimit){
+                    ffmpeg(path)
+                      .outputOptions([
+                        '-vf scale=-1:360' // Resizes to 360px height, maintaining aspect ratio
+                      ])
+                      .on('end', () => {
+                        console.log('Video conversion to 360px complete!');
+                      })
+                      .on('error', (err) => {
+                        console.error('Error during video conversion:', err);
+                      })
+                      .save(outputPath);
+                }else{
+                    break
+                }
+                if(i == 3 && i <= resLimit){
+                    ffmpeg(path)
+                      .outputOptions([
+                        '-vf scale=-1:360' // Resizes to 360px height, maintaining aspect ratio
+                      ])
+                      .on('end', () => {
+                        console.log('Video conversion to 360px complete!');
+                      })
+                      .on('error', (err) => {
+                        console.error('Error during video conversion:', err);
+                      })
+                      .save(outputPath);
+                }else{
+                    break
+                }
+                if(i == 4 && i <= resLimit){
+                    ffmpeg(path)
+                      .outputOptions([
+                        '-vf scale=-1:480' // Resizes to 480px height, maintaining aspect ratio
+                      ])
+                      .on('end', () => {
+                        console.log('Video conversion to 480px complete!');
+                      })
+                      .on('error', (err) => {
+                        console.error('Error during video conversion:', err);
+                      })
+                      .save(outputPath);
+                }else{
+                    break
+                }
+                if(i == 5 && i <= resLimit){
+                    ffmpeg(path)
+                      .outputOptions([
+                        '-vf scale=-1:720' // Resizes to 720px height, maintaining aspect ratio
+                      ])
+                      .on('end', () => {
+                        console.log('Video conversion to 720px complete!');
+                      })
+                      .on('error', (err) => {
+                        console.error('Error during video conversion:', err);
+                      })
+                      .save(outputPath);
+                }else{
+                    break
+                }
+                if(i == 6 && i <= resLimit){
+                    ffmpeg(path)
+                      .outputOptions([
+                        '-vf scale=-1:1080' // Resizes to 1080px height, maintaining aspect ratio
+                      ])
+                      .on('end', () => {
+                        console.log('Video conversion to 1080px complete!');
+                      })
+                      .on('error', (err) => {
+                        console.error('Error during video conversion:', err);
+                      })
+                      .save(outputPath);
+                }else{
+                    break
+                }
+            }
+        }
+    }catch{
+        
+    }
+}
+
+function convertToDASH(inputPath, outputPath,mediaId) {
+  const command = `ffmpeg -i ${inputPath} \
+    -map 0 -map 0 -c:a aac -c:v libx264 \
+    -b:v:0 800k -b:v:1 300k -s:v:1 320x170 \
+    -profile:v:0 high -profile:v:1 baseline \
+    -bf 1 -keyint_min 120 -g 120 -sc_threshold 0 \
+    -b_strategy 0 -use_timeline 1 -use_template 1 \
+    -f dash ${outputPath}/${mediaId}.mpd`;
+  
+  exec(command, (error, stdout, stderr) => {
+    if (error) {
+      console.error(`Error: ${error.message}`);
+      return;
+    }
+    console.log('DASH conversion completed!');
+  });
+}
+
 app.post("/upload-user-video/:id", async(request,response)=>{
     
     try{ 
@@ -2274,17 +2697,24 @@ app.post("/upload-user-video/:id", async(request,response)=>{
         let check = await checkIfSocketActive(userId)
         let socket = getUserSocket(userId)
         let mediaId = socket.mediaId
-        let mediaFormat = socket.mediaFormat
         if(check == true){ 
-            let data = request.body
-            data.mv(__dirname + `/User Data/${userId}/Videos/${mediaId}.${mediaFormat}` , (error)=>{
-                if(error){
-                    console.log(error)
-                }else{
-                    response.send(JSON.stringify({"status": "success"}))
+            try{
+            
+                let data = request.body.file
+                let path = __dirname + `/User Data/${userId}/DASHVideos`
+                if(fs.existsSync(path) == false){
+                    fs.mkdirSync(path)
                 }
-            })
-        } 
+                convertToDifferentResolutions(data,userId,null,mediaId)
+                convertToDASH(data,path,mediaId)
+                response.send(JSON.stringify({"status":"success"}))
+                    
+            }catch{
+                response.send(JSON.stringify({"status":"server-error"}))
+            }
+        }else{
+			response.sendStatus(404)
+		} 
     }catch{
         response.sendStatus(404)
     }
@@ -2352,15 +2782,21 @@ app.post("/upload-business-video/:id", async(request,response)=>{
         let mediaFormat = socket.mediaFormat
         let ownerId = socket.ownerId
         if(check == true){ 
-            let data = request.body
-            data.mv(__dirname + `/User Data/${ownerId}/Businesses/${businessId}/Videos/${mediaId}.${mediaFormat}` , (error)=>{
-                if(error){
-                    console.log(error)
-                }else{
-                    response.send(JSON.stringify({"status": "success"}))
+            try{
+                let data = request.body
+                let path = __dirname + `/User Data/${ownerId}/Businesses/${businessId}/DASHVideos`
+                if(fs.existsSync(path) == false){
+                    fs.mkdirSync(path)
                 }
-            })
-        } 
+                convertToDifferentResolutions(data,userId,businessId,mediaId)
+                convertToDASH(data,path,mediaId)
+                response.send(JSON.stringify({"status":"success"}))
+            }catch{
+                response.send(JSON.stringify({"status":"server-error"}))
+            }
+        }else{
+			response.sendStatus(404)
+		} 
     }catch{
         response.sendStatus(404)
     }
@@ -2540,6 +2976,7 @@ app.post("/upload-post" , async(request,response)=>{
         let userId = data.userId 
         let post = data.post
         let type = data.type 
+		let mode = data.mode
         
 		let socketCheck = await checkIfSocketActive(userId)
 		if(socketCheck == true){
@@ -2570,56 +3007,61 @@ app.post("/upload-post" , async(request,response)=>{
             let events = getEvents.body
             let tips = getTips.body 
 			
-			if(type === "Basic Text Post"){ 
+			if(mode === "Group Share Mode"){
 				userPosts.push(post)
-				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body" : userPosts}})
-			}
-			if(type === "Media Post"){ 
-				 userPosts.push(post)
-				 await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body" : userPosts}})
-			} 
-			if(type === "Video Post"){ 
-				 videoPosts.push(post)
-				 await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"video-posts"},{$set:{"body" : videoPosts}})
-			}
-			
-			if(type === "Article Post"){ 
-				 articles.push(post)
-				 await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"article-posts"},{$set:{"body" : articlePosts}})
-			}
-			
-			if(type === "Channel Feed Post"){ 
-				 channelPosts.push(post)
-				 await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"channel-posts"},{$set:{"body" : channelPosts}})
-			}
-			
-			if(type === "Market Place Post"){ 
-				marketPlacePosts.push(post)
-				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"market-place-posts"},{$set:{"body" : marketPlacePosts}})
-			} 
-			if(type === "Business Post"){ 
-				businessPosts.push(post)
-				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"business-posts"},{$set:{"body" : businessPosts}})
-			}
-			if(type === "Story Post"){ 
-				storyPosts.push(post)
-				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"story-posts"},{$set:{"body" : storyPosts}})
-			}
-			if(type === "Group Post"){ 
-				groupPosts.push(post)
-				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"group-posts"},{$set:{"body" : groupPosts}})
-			}
-			if(type === "Religious Post"){ 
-				religiousPosts.push(post)
-				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"religous-posts"},{$set:{"body" : religiousPosts}})
-			}
-			if(type === "Event"){ 
-				events.push(post)
-				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"all-events"},{$set:{"body" : events}})
-			}
-			if(type === "Business Tip Of Day"){
-			    tips.push(post)
-			    await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"business-tips"},{$set:{"body":tips}})
+				await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body":userPosts}})
+			}else{
+				if(type === "Basic Text Post"){ 
+					userPosts.push(post)
+					await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body" : userPosts}})
+				}
+				if(type === "Media Post"){ 
+					 userPosts.push(post)
+					 await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-posts"},{$set:{"body" : userPosts}})
+				} 
+				if(type === "Video Post"){ 
+					 videoPosts.push(post)
+					 await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"video-posts"},{$set:{"body" : videoPosts}})
+				}
+				
+				if(type === "Article Post"){ 
+					 articles.push(post)
+					 await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"article-posts"},{$set:{"body" : articlePosts}})
+				}
+				
+				if(type === "Channel Feed Post"){ 
+					 channelPosts.push(post)
+					 await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"channel-posts"},{$set:{"body" : channelPosts}})
+				}
+				
+				if(type === "Market Place Post"){ 
+					marketPlacePosts.push(post)
+					await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"market-place-posts"},{$set:{"body" : marketPlacePosts}})
+				} 
+				if(type === "Business Post"){ 
+					businessPosts.push(post)
+					await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"business-posts"},{$set:{"body" : businessPosts}})
+				}
+				if(type === "Story Post"){ 
+					storyPosts.push(post)
+					await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"story-posts"},{$set:{"body" : storyPosts}})
+				}
+				if(type === "Group Post"){ 
+					groupPosts.push(post)
+					await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"group-posts"},{$set:{"body" : groupPosts}})
+				}
+				if(type === "Religious Post"){ 
+					religiousPosts.push(post)
+					await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"religous-posts"},{$set:{"body" : religiousPosts}})
+				}
+				if(type === "Event"){ 
+					events.push(post)
+					await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"all-events"},{$set:{"body" : events}})
+				}
+				if(type === "Business Tip Of Day"){
+					tips.push(post)
+					await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"business-tips"},{$set:{"body":tips}})
+				}
 			}
 			
 			response.send(JSON.stringify({"status":"success"}))
@@ -3309,6 +3751,7 @@ app.post("/find-post" , async(request,response)=>{
             var getMarketPlacePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"market-place-posts"})
             var getEvents = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"all-events"})
             var getTips = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"business-tips"})
+			var getPlaylists = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-playlists"})
             
             
             //extraction 
@@ -3323,6 +3766,7 @@ app.post("/find-post" , async(request,response)=>{
             let marketPlacePosts = getMarketPlacePosts.body
             let events = getEvents.body
             let tips = getTips.body
+			let playlists = getPlaylists.body
              
             let index = null 
             
@@ -3399,8 +3843,15 @@ app.post("/find-post" , async(request,response)=>{
             }else{
 				type = "channel posts"
 			}
-			if(index != null){
+			if(index == null){
+                index = playlists.findIndex((playlists)=>{
+                    return playlists.id === postId
+                })
+            }else{
 				type = "tips"
+			}
+			if(index != null){
+				type = "playlists"
 			}
 
 			let output = null
@@ -3441,6 +3892,9 @@ app.post("/find-post" , async(request,response)=>{
 			}
 			if(type === "tips"){
 			    output = tips[index]
+			}
+			if(type === "playlists"){
+			    output = playlists[index]
 			}
 			
 			response.send(JSON.stringify({"status":"success","data":output}))
@@ -5710,39 +6164,36 @@ function createUserDirectories(user){
     var userId = user.userId
     fs.mkdir(path.join(__dirname+`/User Data/${userId}`, (error)=>{
         if(!error) {
-            fs.mkdir(path.join(__dirname+`/User Data/${userId}`, (error)=>{
+            fs.mkdir(path.join(__dirname+`/User Data/${userId}/Images`, (error)=>{
                 if(!error){
-                    fs.mkdir(path.join(__dirname+`/User Data/${userId}/Images`, (error)=>{
+                    fs.mkdir(path.join(__dirname+`/User Data/${userId}/Videos`, (error)=>{
+                        if(!error){
+                            fs.mkdir(path.join(__dirname+`/User Data/${userId}/Audio`, (error)=>{
+                                if(!error){
+                                    fs.mkdir(path.join(__dirname+`/User Data/${userId}/HLSPlaylists`, (error)=>{
                                         if(!error){
-                                            fs.mkdir(path.join(__dirname+`/User Data/${userId}/Videos`, (error)=>{
-                                                                if(!error){
-                                                                    fs.mkdir(path.join(__dirname+`/User Data/${userId}/Audio`, (error)=>{
-                                                                                        if(!error){
-                                                                                            fs.mkdir(path.join(__dirname+`/User Data/${userId}/Audio`, (error)=>{
-
-                                                                                                                if(!error){
-                        
-                                                                                                                    fs.mkdir(path.join(__dirname+`/User Data/${userId}/Data`, (error)=>{
-                                                                                                                        fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses`, (error)=>{
-                                                                                                                            output = true
-                                                                                                                        }))
-                                                                                                                    }))
-                                                                                                                }else{
-                                                                                                                    console.log(error)
-                                                                                                                }
-                                                                                            }))
-                                                                                            
-                                                                                        }else{
-                                                                                            console.log(error)
-                                                                                        }
-                                                                    }))
-                                                                }else{
-                                                                    console.log(error)
-                                                                }
+                                            fs.mkdir(path.join(__dirname+`/User Data/${userId}/Data`, (error)=>{
+                                                if(!error){
+                                                    fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses`, (error)=>{
+                                                        output = true
+                                                    }))
+                                                }else{
+                                                    console.log(error)
+                                                }
+												
                                             }))
+                                            
                                         }else{
                                             console.log(error)
                                         }
+                                    }))
+                                }else{
+                                    console.log(error)
+                                }
+                            }))
+                        }else{
+                            console.log(error)
+                        }
                     }))
                 }else{
                     console.log(error)
@@ -5751,34 +6202,131 @@ function createUserDirectories(user){
         }
     }))
     
+    
+    if(output == true){
+        //Create video directories 
+        fs.mkdir(path.join(__dirname+`/User Data/${userId}/144videos`, (error)=>{
+            if(error){
+                console.log(error)
+            }else{
+                fs.mkdir(path.join(__dirname+`/User Data/${userId}/240videos`, (error)=>{
+                    if(error){
+                        console.log(error)
+                    }else{
+                        fs.mkdir(path.join(__dirname+`/User Data/${userId}/360videos`, (error)=>{
+                            if(error){
+                                console.log(error)
+                            }else{
+                                fs.mkdir(path.join(__dirname+`/User Data/${userId}/480videos`, (error)=>{
+                                    if(error){
+                                        console.log(error)
+                                    }else{
+                                        fs.mkdir(path.join(__dirname+`/User Data/${userId}/720videos`, (error)=>{
+                                            if(error){
+                                                console.log(error)
+                                            }else{
+                                                fs.mkdir(path.join(__dirname+`/User Data/${userId}/1080videos`, (error)=>{
+                                                    if(error){
+                                                        output = false
+                                                        console.log(error)
+                                                    }
+                                                }))
+                                            }
+                                        }))
+                                    }
+                                }))
+                            }
+                        }))
+                    }
+                }))
+            }
+        }))
+    }
+    
     return output
 }
 
 function createBusinessDirectories(userId,businessId){
     let output = false
-    let createBase = createDirectory(`User Data/${userId}/Businesses/${businessId}`)
-    if(createBase == true){
-        let createImages = createDirectory(`User Data/${userId}/Businesses/${businessId}/Images`)
-
-        if(createImages == true){
     
-            let createVideos = createDirectory(`User Data/${userId}/Businesses/${businessId}/Videos`)
-            if(createVideos == true){
-                let createAudio = createDirectory(`User Data/${userId}/Businesses/${businessId}/Audio`)
-                if(createAudio == true){
-                    let createData = createDirectory(`User Data/${userId}/Businesses/${businessId}/Data`)
-
-                    if(createData == true){
-                        output = true
-                    }else{
-						output = false
-					}
-                  
+	fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}`, (error)=>{
+        if(!error) {
+            fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}/Images`, (error)=>{
+                if(!error){
+                    fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}/Videos`, (error)=>{
+                        if(!error){
+                            fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}/Audio`, (error)=>{
+                                if(!error){
+                                    fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}/HLSPlaylists`, (error)=>{
+                                        if(!error){
+                                            fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}/Data`, (error)=>{
+                                                if(!error){
+                                                    output = true
+                                                }else{
+                                                    console.log(error)
+                                                }
+												
+                                            }))
+                                            
+                                        }else{
+                                            console.log(error)
+                                        }
+                                    }))
+                                }else{
+                                    console.log(error)
+                                }
+                            }))
+                        }else{
+                            console.log(error)
+                        }
+                    }))
+                }else{
+                    console.log(error)
                 }
-            }
-            
+            }))
         }
+    }))
+	
+	if(output == true){
+        //Create video directories 
+        fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}/144videos`, (error)=>{
+            if(error){
+                console.log(error)
+            }else{
+                fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}/240videos`, (error)=>{
+                    if(error){
+                        console.log(error)
+                    }else{
+                        fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}/360videos`, (error)=>{
+                            if(error){
+                                console.log(error)
+                            }else{
+                                fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}/480videos`, (error)=>{
+                                    if(error){
+                                        console.log(error)
+                                    }else{
+                                        fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}/720videos`, (error)=>{
+                                            if(error){
+                                                console.log(error)
+                                            }else{
+                                                fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}/1080videos`, (error)=>{
+                                                    if(error){
+                                                        output = false
+                                                        console.log(error)
+                                                    }
+                                                }))
+                                            }
+                                        }))
+                                    }
+                                }))
+                            }
+                        }))
+                    }
+                }))
+            }
+        }))
     }
+	
     return output
 }
 
@@ -6500,9 +7048,28 @@ app.get("/get-user-video/:id", async(request,response)=>{
         if(checkSocket == true){
             let socket = await getUserSocket(userId)
             let mediaId = socket.mediaId
+            let ownerId = socket.ownerId
+            let stream = fs.createReadStream(__dirname+`/User Data/${ownerId}/DASHVideos/${mediaId}.mpd`)
+            stream.pipe(response)
+        }else{
+            response.sendStatus(404)
+        }
+    }catch{
+        response.send(JSON.stringify({"status" : "server-error"}))
+    }
+}) 
+
+app.get("/download-user-video/:id", async(request,response)=>{
+    try{ 
+        let userId = request.params.id
+        let checkSocket = await checkIfSocketActive(userId) 
+        if(checkSocket == true){
+            let socket = await getUserSocket(userId)
+            let mediaId = socket.mediaId
             let mediaFormat = socket.mediaFormat
             let ownerId = socket.ownerId
-            let stream = fs.createReadStream(__dirname+`/User Data/${ownerId}/Videos/${mediaId}.${mediaFormat}`)
+            let vidType = socket.vidType
+            let stream = fs.createReadStream(__dirname+`/User Data/${ownerId}/${vidType}/${mediaId}.mp4`)
             stream.pipe(response)
         }else{
             response.sendStatus(404)
@@ -6653,7 +7220,28 @@ app.get("/get-business-video/:id", async(request,response)=>{
             let businessId = socket.businessId
             let mediaId = socket.mediaId
             let mediaFormat = socket.mediaFormat
-            let stream = fs.createReadStream(__dirname+`/User Data/${ownerId}/Businesses/${businessId}/Videos/${mediaId}.${mediaFormat}`)
+            let stream = fs.createReadStream(__dirname+`/User Data/${ownerId}/Businesses/${businessId}/DASHVideos/${mediaId}.mpd`)
+            stream.pipe(response)
+        }else{
+            response.sendStatus(404)
+        }
+    }catch{
+        response.send(JSON.stringify({"status" : "server-error"}))
+    }
+}) 
+
+app.get("/download-business-video/:id", async(request,response)=>{
+    try{
+        let userId = request.params.id
+        let checkSocket = await checkIfSocketActive(userId)
+        if(checkSocket == true){
+            let socket = await getUserSocket(userId)
+            let ownerId = socket.ownerId
+            let businessId = socket.businessId
+            let mediaId = socket.mediaId
+            let mediaFormat = socket.mediaFormat
+            let vidType = socket.vidType
+            let stream = fs.createReadStream(__dirname+`/User Data/${ownerId}/Businesses/${businessId}/${vidType}/${mediaId}.mp4`)
             stream.pipe(response)
         }else{
             response.sendStatus(404)
@@ -8251,23 +8839,49 @@ app.post("/check-conversation-existence", async(request,response)=>{
 	
 	app.post("/send-video-call-output/:id",async(request,response)=>{
 		try{
-
+            
 			let userid = request.params.id 
 			
 			let socketCheck = await checkIfSocketActive(userid)
 			
 			if(socketCheck == true){
-
-				let readStream = ss(io.sockets).createStream()
-				fs.createReadStream(request.body).pipe(readStream)
-				
-				app.get(`/recieve-video-call-feed/${userid}`,(request,response)=>{
-				    response.pipe(readStream)
-				})
-				
-			}
+                const outputStream = new PassThrough
+                
+    			ffmpeg(request)
+                    .inputFormat('mp4') // Change this based on your input format
+                    .videoCodec('libx264')
+                    .audioCodec('aac')
+                    .outputOptions([
+                      '-hls_time 10', // Segment duration in seconds
+                      '-hls_list_size 0', // Keep all segments in playlist
+                      '-hls_segment_filename ' + outputPattern,
+                      '-f hls'
+                    ])
+                    .output(outputStream, { end: true })
+                    .on('start', (commandLine) => {
+                      console.log('Spawned FFmpeg with command: ' + commandLine);
+                    })
+                    .on('error', (err, stdout, stderr) => {
+                      console.error('Error:', err.message);
+                      console.error('stdout:', stdout);
+                      console.error('stderr:', stderr);
+                    })
+                    .on('end', ()=>{
+                      console.log('Processing finished');
+                    })
+                    .run();
+    
+    				app.get("/recieve-video-call-output/:id",async(request,response)=>{
+    					outputStream.pipe(response)
+    				})
+			}else{
+				response.sendStatus(404)
+			} 
+              
+            request.on('end', ()=>{response.send('Stream complete')})
+            
 		}catch{
-			//No handler
+			response.send('server-error')
 		}
 	})
 	app.post("/send-audio-call-output/:id",async(request,response)=>{
@@ -8279,12 +8893,37 @@ app.post("/check-conversation-existence", async(request,response)=>{
 			
 			if(socketCheck == true){
 
-				let readStream = ss(io.sockets).createStream()
-				fs.createReadStream(request.body).pipe(readStream)
+				const outputStream = new PassThrough
+            
+    			ffmpeg(request)
+                    .inputFormat('mp3') // Change this based on your input format
+                    .audioCodec('aac')
+                    .audioBitrate('128k')
+                    .format('hls')
+                    .outputOptions([
+                        '-hls_time 10', // Segment duration in seconds
+                        '-hls_list_size 0', // Keep all segments in playlist
+                        '-hls_segment_filename', 'audio_%03d.ts' // Segment file naming pattern
+                    ])
+                    .output(outputStream, { end: true })
+                    .on('start', (commandLine) => {
+                      console.log('Spawned FFmpeg with command: ' + commandLine);
+                    })
+                    .on('error', (err, stdout, stderr) => {
+                      response.send('Stream error')
+                    })
+                    .on('end', ()=>{
+                      console.log('Processing finished');
+                    })
+                    .run();
+                  
 				
 				app.get(`/recieve-audio-call-feed/${userid}`,(request,response)=>{
-				    response.pipe(readStream)
+				    outputStream.pipe(response)
 				})
+			}
+			else{
+			    response.sendStatus(404)
 			}
 		}catch{
 			//No handler
@@ -8294,31 +8933,36 @@ app.post("/check-conversation-existence", async(request,response)=>{
 	app.post("/send-live-stream-output/:id",async(request,response)=>{
 		try{
 
-			let feedId = request.params.id 
+			const outputStream = new PassThrough
+            
+			ffmpeg(request)
+                .inputFormat('mp4') // Change this based on your input format
+                .videoCodec('libx264')
+                .audioCodec('aac')
+                .outputOptions([
+                  '-hls_time 10', // Segment duration in seconds
+                  '-hls_list_size 0', // Keep all segments in playlist
+                  '-hls_segment_filename ' + outputPattern,
+                  '-f hls'
+                ])
+                .output(outputStream, { end: true })
+                .on('start', (commandLine) => {
+                  console.log('Spawned FFmpeg with command: ' + commandLine);
+                })
+                .on('error', (err, stdout, stderr) => {
+                  response.send('Stream error')
+                })
+                .on('end', ()=>{
+                  console.log('Processing finished');
+                })
+                .run();
+              
+            app.get("/recieve-live-feed-output/:id",async(request,response)=>{
+                outputStream.pipe(response)
+            })
+              
+            request.on('end', ()=>{response.send('Stream complete')})
 			
-			let feed = liveFeeds.find((liveFeeds)=>{
-			    return liveFeeds.feedId === feedId
-			})
-			
-			let accessorId = feed.accessorId
-			
-			let socketCheck = await checkIfSocketActive(accessorId)
-			
-			if(socketCheck == true){
-
-				let readStream = ss(io.sockets).createStream()
-				fs.createReadStream(request.body).pipe(readStream)
-				
-				app.get(`/recieve-live-feed/${userid}`,(request,response)=>{
-				    response.pipe(readStream)
-				})
-				
-				while(readStream.ended() == true){
-				    response.end("Completed")
-					break
-				}
-				
-			}
 		}catch{
 			//No handler
 		}
@@ -8695,6 +9339,60 @@ app.post("/check-conversation-existence", async(request,response)=>{
 		
 	})
 	
+	app.post("/generate-code-alt",async(request,response)=>{
+		
+		try{
+			
+			let data = request.body 
+			
+			let userId = data.userId 
+			
+			let codeGen = await generateVerificationCode()
+				
+			let newCodeObj = {
+				"businessId":null,
+				"userId":userId,
+				"code":codeGen,
+				"expired":false,
+				"serverTime": serverTime
+			}
+				
+			verifications.push(newCodeObj)
+				
+			response.send(JSON.stringify({"status":"success","code":newCodeObj.code}))
+			
+		}catch{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+		
+	})
+	
+	app.post("/get-email-user-data",async(request,response)=>{
+	    try{
+	        
+	        let data = request.body
+	        
+	        let emailAddress = data.emailAddress
+	        
+	        let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"})
+	        let users = getUsers.body
+	        
+	        let user = users.find((users)=>{
+	            return users.emailAddress == emailAddress
+	        })
+	        
+	        let output = {
+	            "userId":user.userId,
+	            "emailAddress": emailAddress
+	        }
+	        
+	        response.send(JSON.stringify({"status":"success","data":output}))
+	        
+	    }catch{
+	        response.send(JSON.stringify({"status":"server-error"}))
+	    }
+	})
+	
 	app.post("/verify-email-address", async(request,response)=>{
 		try{
 			
@@ -8735,6 +9433,57 @@ app.post("/check-conversation-existence", async(request,response)=>{
 		}
 	})
 	
+	app.post("/verify-email-address-alt", async(request,response)=>{
+		try{
+			
+			let data = request.body 
+			
+			let userId = data.userId 
+			
+			let user  = verifications.find((verifications)=>{
+				return verifications.userId === data.userId
+			})
+			if(user.code === data.code && user.expired != true){
+				response.send(JSON.stringify({"status":"success"}))
+			}else{
+				response.send(JSON.stringify({"status":"invalid"}))
+			}
+			
+		}catch{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+	})
+	
+	app.post("/login-user-alt",async(request,response)=>{
+	    try{
+	        let data = request.body 
+	        let input = data.input 
+	        
+	        let check = verifications.find((verifications)=>{
+	            return verifications.userId == input.userId
+	        })
+	        
+	        if(check){
+	            
+	            let getSockets = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-sockets"})
+                let sockets = getSockets.body
+                let socket = sockets.find((sockets)=>{
+                    return sockets.userId === input.userId
+                })
+	            socket.active = true 
+	            socket.alreadyLoggedIn = true
+	            await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"user-sockets"},{$set:{"body":sockets}})
+	            response.send(JSON.stringify({"status":"success"}))
+	            
+	        }else{
+	            response.sendStatus(404)
+	        }
+	        
+	    }catch{
+	        response.send(JSON.stringify({"status":"server-error"}))
+	    }
+	})
+	
 	async function clearUpVerifications(){
 		
 		let currenthours = serverTime.hours
@@ -8760,6 +9509,466 @@ app.post("/check-conversation-existence", async(request,response)=>{
 		}
 		
 	}
+	
+	app.post("/like-story",async(request,response)=>{
+		try{
+			
+			let data = request.body 
+			
+			let userId = data.userId 
+			let postId = data.postId
+			let storyId = data.mediaId
+			
+			let socketCheck = await checkIfSocketActive(userId)
+			
+			if(socketCheck == true){
+				let getStoryPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"story-posts"})
+				let storyPosts = getStoryPosts.body;
+				
+				let story = storyPosts.find((storyPosts)=>{
+					return storyPosts.basicDetails.id === postId 
+				})
+				
+				if(story){
+					
+					let likes = story.likes 
+					
+					if(likes.includes(userId)){
+						likes.splice(likes.indexOf(userId),1)
+						response.send(JSON.stringify({"status":"unliked","count":likes.length}))
+					}else{
+						likes.push(userId)
+						response.send(JSON.stringify({"status":"liked","count":likes.length}))
+					}
+					await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"story-posts"},{$set:{"body":storyPosts}})
+					
+				}else{
+					response.send(JSON.stringify({"status":"server-error"}))
+				}
+				
+			}else{
+				response.sendStatus(404)
+			}
+			
+		}catch{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+	})
+	
+	app.post("/upload-story-comment",async(request,response)=>{
+		try{
+			let data = request.body 
+			
+			let userId = data.userId 
+			let postId = data.storyId
+			let storyId = data.mediaId
+			let comment = data.comment
+			
+			let socketCheck = await checkIfSocketActive(userId)
+			
+			if(socketCheck == true){
+				let getStoryPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"story-posts"})
+				let storyPosts = getStoryPosts.body;
+				
+				let story = storyPosts.find((storyPosts)=>{
+					return storyPosts.basicDetails.id === postId 
+				})
+				
+				if(story){
+					
+					let media = story.media 
+					
+					for(var i=0; i<media.length ; i++){
+						let x = media[i]
+						if(x.id === storyId){							
+							x.comments.push(comment)
+						}
+					}
+					
+					await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"story-posts"},{$set:{"body":storyPosts}})
+					
+				}else{
+					response.send(JSON.stringify({"status":"server-error"}))
+				}
+				
+			}else{
+				response.sendStatus(404)
+			}
+		}catch{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+	})
+	
+	const getGroupPosts = async(output,array,groupId)=>{
+		
+		for(var i=0; i<array.length; i++){
+			let post = array[i]
+			let basicDetails = post.basicDetails
+			let groupPost = basicDetails.groupPost
+			let x = basicDetails.groupId
+			if(groupPost == true && groupId == x){
+				output.push(post)
+			}
+		}
+		
+		return output
+	}
+	
+	app.post("/get-specific-group-posts", async(request,response)=>{
+		try{
+			
+			let data = request.body 
+			
+			let groupId = data.groupId 
+			
+			let accessorId = data.accessorId 
+			
+			let socketCheck = await checkIfSocketActive(accessorId)
+			
+			if(socketCheck == true){
+				
+				var getBusinessPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"business-posts"}) 
+				var getUserPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-posts"})
+				var getChannelPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"channel-posts"})
+				var getArticlePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"article-posts"})
+				var getVideoPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"video-posts"})
+				var getReligiousPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"religious-posts"})
+				var getGroupPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"group-posts"})
+				var getStoryPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"story-posts"})
+				var getMarketPlacePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"market-place-posts"})
+				var getEvents = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"all-events"})
+				var getTips = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"business-tips"})
+				
+				
+				//extraction 
+				let businessPosts = getBusinessPosts.body  
+				let userPosts = getUserPosts.body
+				let channelPosts = getChannelPosts.body
+				let articles = getArticlePosts.body 
+				let videoPosts = getVideoPosts.body
+				let storyPosts = getStoryPosts.body
+				let groupPosts = getGroupPosts.body
+				let religiousPosts = getReligiousPosts.body
+				let marketPlacePosts = getMarketPlacePosts.body
+				let events = getEvents.body
+				let tips = getTips.body
+				
+				let posts = []
+				
+				let p1 = await getGroupPosts(posts,businessPosts,groupId)
+				let p2 = await getGroupPosts(p1,userPosts,groupId)
+				let p3 = await getGroupPosts(p2,articles,groupId)
+				let p4 = await getGroupPosts(p3,channelPosts,groupId)
+				let p5 = await getGroupPosts(p4,videoPosts,groupId)
+				let p6 = await getGroupPosts(p5,storyPosts,groupId)
+				let p7 = await getGroupPosts(p6,religiousPosts,groupId)
+				let p8 = await getGroupPosts(p7,marketPlacePosts,groupId)
+				let p9 = await getGroupPosts(p8,events,groupId)
+				let p10 = await getGroupPosts(p9,tips,groupId)
+				
+				response.send(JSON.stringify({"status":"success","data":p10}))
+				
+			}else{
+				response.send(JSON.stringify({"status":"server-error"}))
+			}
+			
+		}catch{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+	})
+	
+	app.post("/get-specific-post", async(request,response)=>{
+	    try{
+	        
+	        let data = request.body 
+	        
+	        let postId = data.postId 
+	        
+	        let userId = data.userId 
+	        
+	        let socketCheck = await checkIfSocketActive(userId)
+	        
+	        if(socketCheck == true){
+	            
+	            var getBusinessPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"business-posts"}) 
+                var getUserPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-posts"})
+                var getChannelPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"channel-posts"})
+                var getArticlePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"article-posts"})
+                var getVideoPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"video-posts"})
+                var getReligiousPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"religious-posts"})
+                var getGroupPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"group-posts"})
+                var getStoryPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"story-posts"})
+                var getMarketPlacePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"market-place-posts"})
+                var getEvents = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"all-events"})
+                var getTips = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"business-tips"})
+                
+                
+                //extraction 
+                let businessPosts = getBusinessPosts.body  
+                let userPosts = getUserPosts.body
+                let channelPosts = getChannelPosts.body
+                let articles = getArticlePosts.body 
+                let videoPosts = getVideoPosts.body
+                let storyPosts = getStoryPosts.body
+                let groupPosts = getGroupPosts.body
+                let religiousPosts = getReligiousPosts.body
+                let marketPlacePosts = getMarketPlacePosts.body
+                let events = getEvents.body
+                let tips = getTips.body
+                
+                let search = null
+                
+                search = businessPosts.find((businessPosts)=>{
+                    return businessPosts.basicDetails.id === postId
+                })
+                if(search){
+                    search = userPosts.find((userPosts)=>{
+                        return userPosts.basicDetails.id === postId
+                    })
+                }
+                if(search){
+                    search = channelPosts.find((channelPosts)=>{
+                        return channelPosts.basicDetails.id === postId
+                    })
+                }
+                if(search){
+                    search = articles.find((articles)=>{
+                        return articles.basicDetails.id === postId
+                    })
+                }
+                if(search){
+                    search = videoPosts.find((videoPosts)=>{
+                        return videoPosts.basicDetails.id === postId
+                    })
+                }
+                if(search){
+                    search = storyPosts.find((storyPosts)=>{
+                        return storyPosts.basicDetails.id === postId
+                    })
+                }
+                if(search){
+                    search = religiousPosts.find((religiousPosts)=>{
+                        return religiousPosts.basicDetails.id === postId
+                    })
+                }
+                if(search){
+                    search = marketPlacePosts.find((marketPlacePosts)=>{
+                        return marketPlacePosts.basicDetails.id === postId
+                    })
+                }
+                if(search){
+                    search = events.find((events)=>{
+                        return events.basicDetails.id === postId
+                    })
+                }
+                if(search){
+                    search = tips.find((tips)=>{
+                        return tips.basicDetails.id === postId
+                    })
+                }
+                
+                if(search){
+                    
+                    response.send(JSON.stringify({
+                        "status":"success",
+                        "data":search
+                    }))
+                    
+                }else{
+                    response.send(JSON.stringify({"status":"not-found"}))
+                }
+             
+	            
+	        }else{
+	            response.sendStatus(404)
+	        }
+	        
+	    }catch{
+	        response.send(JSON.stringify({"status":"server-error"}))
+	    }
+	})
+	
+	app.post("/get-purchase-transfer",async(request,response)=>{
+		try{
+			
+			let data = request.body 
+			
+			let userId = data.userId 
+			
+			let refCode = data.refCode 
+			
+			let socketCheck = await checkIfSocketActive(userId)
+			
+			if(socketCheck == true){
+				
+				let purchaseData = purchaseRequests.find((purchaseRequests)=>{
+					return purchaseRequests.refCode === refCode
+				})
+				
+				if(purchaseData){
+					
+					response.send(JSON.stringify({"status":purchaseData.status}))
+					
+				}else{
+					response.send(JSON.stringify({"status":"Not found"}))
+				}
+				
+			}else{
+				response.sendStatus(404)
+			}
+			
+		}catch{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+	})
+	
+	app.get("/check-maintenance",(request,response)=>{
+		response.send(JSON.stringify({"status":"success"}))
+	})
+	
+	app.get("/get-installer-data", async(request,response)=>{
+		let getData = fs.createReadStream(__dirname+"/Installer/installer.apk")
+		getData.pipe(response)
+	})
+	
+	app.post("/get-video-options", async(request,response)=>{
+		try{
+			
+			let data = request.body 
+			
+			let mediaId = data.id
+			let ownerId = data.ownerId
+			let businessId = data.businessId
+			let format = data.format
+			
+			let index = 0 
+			
+			if(businessId == null){
+				
+				let check1 = fs.exists(__dirname+`/User Data/${ownerId}/144videos/${mediaId}.mp4`)
+				let check2 = fs.exists(__dirname+`/User Data/${ownerId}/240videos/${mediaId}.mp4`)
+				let check3 = fs.exists(__dirname+`/User Data/${ownerId}/360videos/${mediaId}.mp4`)
+				let check4 = fs.exists(__dirname+`/User Data/${ownerId}/480videos/${mediaId}.mp4`)
+				let check5 = fs.exists(__dirname+`/User Data/${ownerId}/720videos/${mediaId}.mp4`)
+				let check6 = fs.exists(__dirname+`/User Data/${ownerId}/1080videos/${mediaId}.mp4`)
+				let proceed = false 
+				if(check1 == true){
+					if(check2 == true){
+						if(check3 == true){
+							if(check4 == true){
+								if(check5 == true){
+									if(check6 == true){
+										index = 6		
+										proceed = true
+									}else{
+										index = 5
+										proceed = true
+									}
+								}else{
+									index = 4
+									proceed = true
+								}
+							}else{
+								index = 3
+								proceed = true
+							}	
+						}else{
+							index = 2
+							proceed = true
+						}
+					}else{
+						index = 1
+						proceed = true
+					}
+				}else{
+					proceed = false
+				}
+				
+				if(proceed == true){
+					response.send(JSON.stringify({"status":"success", "index":index}))
+				}else{
+					response.send(JSON.stringify({"status":"error"}))
+				}
+				
+			}
+			else{
+				
+				let check1 = fs.exists(__dirname+`/User Data/${ownerId}/Businesses/${businessId}/144videos/${mediaId}.mp4`)
+				let check2 = fs.exists(__dirname+`/User Data/${ownerId}/Businesses/${businessId}/240videos${mediaId}.mp4`)
+				let check3 = fs.exists(__dirname+`/User Data/${ownerId}/Businesses/${businessId}/360videos/${mediaId}.mp4`)
+				let check4 = fs.exists(__dirname+`/User Data/${ownerId}/Businesses/${businessId}/480videos/${mediaId}.mp4`)
+				let check5 = fs.exists(__dirname+`/User Data/${ownerId}/Businesses/${businessId}/720videos/${mediaId}.mp4`)
+				let check6 = fs.exists(__dirname+`/User Data/${ownerId}/Businesses/${businessId}/1080videos/${mediaId}.mp4`)
+				let proceed = false 
+				if(check1 == true){
+					if(check2 == true){
+						if(check3 == true){
+							if(check4 == true){
+								if(check5 == true){
+									if(check6 == true){
+										index = 6		
+										proceed = true
+									}else{
+										index = 5
+										proceed = true
+									}
+								}else{
+									index = 4
+									proceed = true
+								}
+							}else{
+								index = 3
+								proceed = true
+							}	
+						}else{
+							index = 2
+							proceed = true
+						}
+					}else{
+						index = 1
+						proceed = true
+					}
+				}else{
+					proceed = false
+				}
+				
+				if(proceed == true){
+					response.send(JSON.stringify({"status":"success", "index":index}))
+				}else{
+					response.send(JSON.stringify({"status":"error"}))
+				}
+				
+			}
+			
+		}catch{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+	})
+	
+	app.get("/set-to-quantum",async(request,response)=>{
+		try{
+			let getLeapYear = mongoClient.db("YEMPData").collection("MainData").findOne({"name":"leap-year-status"})
+			let leapYear = getLeapYear.x
+			if(leapYear == true){
+				leapYear = false
+			}else{
+				leapYear = true
+			}
+			await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"leap-year-status"},{$set:{"x":leapYear}})
+		}catch{
+			response.send(JSON.stringify({"status":"server-error"}))
+		}
+	})
+	
+	async function maintenanceProcess(){
+		let getData = await fetch("http://192.168.30.187:1994/check-maintenance")
+		let data = await getData.json()
+		let status = data.status 
+		
+		console.log("Maintenance Status -->"+status)	
+	}
+	
+	//setInterval(maintenanceProcess,1000*30)
 
 	setInterval(clearUpVerifications,30000)
 
