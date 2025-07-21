@@ -9963,14 +9963,14 @@ app.post("/check-conversation-existence", async(request,response)=>{
 	})
 	
 	async function maintenanceProcess(){
-		let getData = await fetch("http://192.168.30.187:1994/check-maintenance")
+		let getData = await fetch("https://youthempowermentapp.onrender.com/check-maintenance")
 		let data = await getData.json()
 		let status = data.status 
 		
 		console.log("Maintenance Status -->"+status)	
 	}
 	
-	//setInterval(maintenanceProcess,1000*30)
+	setInterval(maintenanceProcess,1000*30)
 
 	setInterval(clearUpVerifications,30000)
 
