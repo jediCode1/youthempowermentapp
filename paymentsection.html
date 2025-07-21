@@ -48,6 +48,8 @@
 			
             userId = urlParams.get("id")
 			
+			console.log(userId)
+			
             socket.emit("get-payment-data",{
                 "userId": userId
             })

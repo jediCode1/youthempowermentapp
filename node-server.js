@@ -20,13 +20,13 @@ const ffmpeg = import("fluent-ffmpeg")
 import { MongoClient } from 'mongodb'
  
  // Enable command monitoring for debugging
-/* 
 const mongoClient = new MongoClient('mongodb+srv://shopmatesales:N6Npa7vcMIaBULIS@cluster0.mgv7t.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0', { monitorCommands: true });
 mongoClient.connect()// Enable command monitoring for debugging
-*/
+/* 
 const mongoClient = new MongoClient(uri, { monitorCommands: true });
 mongoClient.connect()// Enable command monitoring for debugging
 //server calls management
+*/
 
 import express from 'express'
 
@@ -1302,15 +1302,18 @@ io.on("connection", (socket)=>{
 		
 		let activeUsers = await getActiveUsers()
 		
-		for(var i=0; i<activeUsers.length; i++){
-			let user = activeUsers[i]
-			user.status = false
+		if(activeUsers.length > 0){
+		
+			for(var i=0; i<activeUsers.length; i++){
+				let user = activeUsers[i]
+				user.status = false
+				
+			}
+			
+			await updateActiveSockets(activeUsers)
+			socket.emit("ping")
 			
 		}
-		
-		await updateActiveSockets(activeUsers)
-		socket.emit("ping")
-	
 	},15000)
 	
 	setInterval(async()=>{
@@ -1319,21 +1322,21 @@ io.on("connection", (socket)=>{
 		
 		let activeUsers = await getActiveUsers()
 		
-		
-		for(var i=0; i<activeUsers.length; i++){ 
-			
-			let user = activeUsers[i]
-			if(user.status == false){
-			    list.push(user)
-			    socket.emit("recieve-typing-status" , {"userId":user.userId,"status":false})
+		if(activeUsers.length > 0){			
+			for(var i=0; i<activeUsers.length; i++){ 
+				
+				let user = activeUsers[i]
+				if(user.status == false){
+					list.push(user)
+					socket.emit("recieve-typing-status" , {"userId":user.userId,"status":false})
+				}
+				
 			}
 			
+			
+			
+			socket.emit("offline-users",{"data": list})
 		}
-		
-		
-		
-		socket.emit("offline-users",{"data": list})
-		
 	},30000)
 	
 	socket.on("affirm",(data)=>{
