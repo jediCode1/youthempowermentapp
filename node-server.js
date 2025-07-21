@@ -25,8 +25,8 @@ mongoClient.connect()// Enable command monitoring for debugging
 /* 
 const mongoClient = new MongoClient(uri, { monitorCommands: true });
 mongoClient.connect()// Enable command monitoring for debugging
-*/
 //server calls management
+*/
 
 import express from 'express'
 
@@ -35,7 +35,7 @@ const app = express()
 
 const server = http.createServer(app)
 
-const port = process.env.port || 1994
+const port = process.env.port || 4000
 
 const ss = import('socket.io-stream')
 
