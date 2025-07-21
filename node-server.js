@@ -20,13 +20,13 @@ const ffmpeg = import("fluent-ffmpeg")
 import { MongoClient } from 'mongodb'
  
  // Enable command monitoring for debugging
+/* 
 const mongoClient = new MongoClient('mongodb+srv://shopmatesales:N6Npa7vcMIaBULIS@cluster0.mgv7t.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0', { monitorCommands: true });
 mongoClient.connect()// Enable command monitoring for debugging
-/* 
+*/
 const mongoClient = new MongoClient(uri, { monitorCommands: true });
 mongoClient.connect()// Enable command monitoring for debugging
 //server calls management
-*/
 
 import express from 'express'
 
@@ -298,7 +298,8 @@ async function getActiveUsers(){
     
     try{
 		
-        let getLeapYear = mongoClient.db("YEMPData").collection("MainData").findOne({"name":"leap-year-status"})
+        let getLeapYear = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"leap-year-status"})
+		console.log(getLeapYear)
 		if(getLeapYear.x == true){
 			let getSockets = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-sockets"})
 			output = getSockets.body 
@@ -1307,7 +1308,6 @@ io.on("connection", (socket)=>{
 			for(var i=0; i<activeUsers.length; i++){
 				let user = activeUsers[i]
 				user.status = false
-				
 			}
 			
 			await updateActiveSockets(activeUsers)
