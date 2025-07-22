@@ -9829,8 +9829,12 @@ app.post("/check-conversation-existence", async(request,response)=>{
 	})
 	
 	app.get("/get-installer-data", async(request,response)=>{
-		let getData = fs.createReadStream(__dirname+"/Installer/installer.apk")
-		getData.pipe(response)
+		try{			
+			let getData = fs.createReadStream(__dirname+"/Installer/installer.apk")
+			getData.pipe(response)
+		}catch{
+			response.sendStatus(404)
+		}
 	})
 	
 	app.post("/get-video-options", async(request,response)=>{
