@@ -25,8 +25,8 @@ mongoClient.connect()// Enable command monitoring for debugging
 /* 
 const mongoClient = new MongoClient(uri, { monitorCommands: true });
 mongoClient.connect()// Enable command monitoring for debugging
-//server calls management
 */
+//server calls management
 
 import express from 'express'
 
@@ -338,7 +338,7 @@ const activateUserSocket = async(userId)=>{
 const addUserSocket = async(userId)=>{
     let activeUsers = await getActiveUsers()
     let newObj = {
-        "userId":null, 
+        "userId":userId, 
         "postsSelected": [],
         "active": true,
         "mediaId": null,
@@ -346,7 +346,8 @@ const addUserSocket = async(userId)=>{
         "currentConversation": null,
 		"businessId":null,
 		"emailAddress":null,
-		"vidType":null
+		"vidType":null,
+		"alreadyLoggedIn":true
     }
     
     activeUsers.push(newObj)
@@ -388,19 +389,23 @@ const loginSocketFunction = async(userId)=>{
 
 const checkIfSocketActive = async(userId)=>{
     let output = false
-    let activeSockets = await getActiveUsers()
+	let getSockets = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-sockets"})
+    let activeSockets = getSockets.body
     let search = activeSockets.find((activeSockets)=>{
         return activeSockets.userId === userId
     })
     
     
-    if(search){
-		let getLeapYear = mongoClient.db("YEMPData").collection("MainData").findOne({"name":"leap-year-status"})
+    if(search != null){
+		if(search.active == true && search.alreadyLoggedIn == true){
+			output = true
+		}
+		/*let getLeapYear = mongoClient.db("YEMPData").collection("MainData").findOne({"name":"leap-year-status"})
 		if(getLeapYear.x == true){			
 			if(search.active == true && search.alreadyLoggedIn == true){
 				output = true
 			}
-		}
+		}*/
     }
     
     return output
@@ -1066,7 +1071,7 @@ io.on("connection", (socket)=>{
 					opens:0,
 					dateCreated:conversation2.dateCreated,
 					dateModified: serverTime,
-					closed: Boolean = false
+					closed:false
 				}
 				newConversation.messages.push(data.message)
 				conversation2.messages.push(data.message)	
@@ -1097,7 +1102,7 @@ io.on("connection", (socket)=>{
 					opens:0,
 					dateCreated:conversation.dateCreated,
 					dateModified: serverTime,
-					closed: Boolean = false
+					closed:false
 				}
 				newConversation.messages.push(data.message)
 				conversation.messages.push(data.message)	
@@ -1348,6 +1353,23 @@ io.on("connection", (socket)=>{
 	
 })
 
+//Page server responses
+
+app.get("/process-payment",async(request,response)=>{
+    try{
+        response.sendFile(__dirname+"/paymentsection.html") 
+    }catch{
+        response.send(JSON.stringify({"status":"server-error"}))
+    }
+})
+app.get("/",async(request,response)=>{
+    try{
+        response.sendFile(__dirname+"/downloadmenu.html") 
+    }catch{
+        response.send(JSON.stringify({"status":"server-error"}))
+    }
+})
+
 /////////////////////////////////////////////////////////////*Post Data Helpers*///////////////////////////////////////////////////////////////////////////////////////
 
 /*Locators*/
@@ -1371,6 +1393,15 @@ const GetUserData = async(userId)=>{
 		output = null
 	}
 	
+	
+	return output
+}
+
+const getBusinessToInterestsMap = async()=>{
+	let output = null 
+	
+	let getMap = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"business-interests-map"})
+	output = getMap.body
 	
 	return output
 }
@@ -1437,112 +1468,26 @@ const GetPostsByRegion = async(feed,userId)=>{
 			let accessor = await GetUserData(userId)
 			let address1 = GetUserRegion(accessor)
 			let basics = userPosts[i].basicDetails;
-			let ownerId = basics.ownerId
-			let user = await GetUserData(ownerId)
-			let address2 = GetUserRegion(user)
-			
-			let drp1 = address1.districtRegionProvince.toRegex()
-			let c1 = address1.city.toRegex()
-			
-			if(
-				address1.country === address2.country &&
-				drp1.matches(address2.districtRegionProvince) &&
-				InterestsEval(accessor,it) &&
-				c1.matches(address2.city) ||
-				address1.zipCode === address2.zipCode
-			){
-				userPostsOut.push(it)
-			}
-			
-		}
-		
-		//sort video posts 
-		
-		let videoPosts = feed.videoPosts
-		let videoPostsOut = []
-		
-		for(var i=0; i<videoPosts.length; i++){
-			
-			let it = videoPosts[i]
-			let accessor = await GetUserData(userId)
-			let address1 = GetUserRegion(accessor)
-			let basics = videoPosts[i].basicDetails;
-			let ownerId = basics.ownerId
-			let user = await GetUserData(ownerId)
-			let address2 = GetUserRegion(user)
-			
-			let drp1 = address1.districtRegionProvince.toRegex()
-			let c1 = address1.city.toRegex()
-			
-			if(
-				address1.country === address2.country &&
-				drp1.matches(address2.districtRegionProvince) &&
-				InterestsEval(accessor,it) &&
-				c1.matches(address2.city) ||
-				address1.zipCode === address2.zipCode
-			){
-				videoPostsOut.push(it)
-			}
-			
-		}
-		
-		//sort group posts 
-		
-		let groupPosts = feed.groupPosts
-		let groupPostsOut = []
-		
-		for(var i=0; i<groupPosts.length; i++){
-			
-			let it = groupPosts[i]
-			let accessor = await GetUserData(userId)
-			let address1 = GetUserRegion(accessor)
-			let basics = groupPosts[i].basicDetails;
-			let ownerId = basics.ownerId
-			let user = await GetUserData(ownerId)
-			let address2 = GetUserRegion(user)
-			
-			let drp1 = address1.districtRegionProvince.toRegex()
-			let c1 = address1.city.toRegex()
-			
-			if(
-				address1.country === address2.country &&
-				drp1.matches(address2.districtRegionProvince) &&
-				InterestsEval(accessor,it) &&
-				c1.matches(address2.city) ||
-				address1.zipCode === address2.zipCode
-			){
-				groupPostsOut.push(it)
-			}
-			
-		}
-		
-		//sort topic posts 
-		
-		let topicPosts = feed.topicPosts
-		let topicPostsOut = []
-		
-		for(var i=0; i<topicPosts.length; i++){
-			
-			let it = topicPosts[i]
-			let accessor = await GetUserData(userId)
-			let address1 = GetUserRegion(accessor)
-			let basics = topicPosts[i].basicDetails;
-			let ownerId = basics.ownerId
-			let user = await GetUserData(ownerId)
-			let address2 = GetUserRegion(user)
-			
-			let drp1 = address1.districtRegionProvince.toRegex()
-			let c1 = address1.city.toRegex()
-			
-			if(
-				address1.country === address2.country &&
-				drp1.matches(address2.districtRegionProvince) &&
-				InterestsEval(accessor,it) &&
-				c1.matches(address2.city) ||
-				address1.zipCode === address2.zipCode
-			){
-				topicPostsOut.push(it)
-			}
+			//do not include group posts 
+			if(basics.groupPost != true){
+				
+				let ownerId = basics.ownerId
+				let user = await GetUserData(ownerId)
+				let address2 = GetUserRegion(user)
+				
+				let drp1 = address1.districtRegionProvince.toRegex()
+				let c1 = address1.city.toRegex()
+				
+				if(
+					address1.country === address2.country ||
+					drp1.matches(address2.districtRegionProvince) ||
+					c1.matches(address2.city) ||
+					address1.zipCode === address2.zipCode ||
+					InterestsEval(accessor,it)
+				){
+					userPostsOut.push(it)
+				}
+			}	
 			
 		}
 		
@@ -1565,8 +1510,8 @@ const GetPostsByRegion = async(feed,userId)=>{
 			let c1 = address1.city.toRegex()
 			
 			if(
-				address1.country === address2.country &&
-				drp1.matches(address2.districtRegionProvince) &&
+				address1.country === address2.country ||
+				drp1.matches(address2.districtRegionProvince) ||
 				c1.matches(address2.city) ||
 				address1.zipCode === address2.zipCode
 			){
@@ -1594,8 +1539,8 @@ const GetPostsByRegion = async(feed,userId)=>{
 			let c1 = address1.city.toRegex()
 			
 			if(
-				address1.country === address2.country &&
-				drp1.matches(address2.districtRegionProvince) &&
+				address1.country === address2.country ||
+				drp1.matches(address2.districtRegionProvince) ||
 				c1.matches(address2.city) ||
 				address1.zipCode === address2.zipCode
 			){
@@ -1609,10 +1554,9 @@ const GetPostsByRegion = async(feed,userId)=>{
 			"userPosts" : userPostsOut,
 			"channelPosts" :  feed.channelPosts,
 			"articles" : feed.articles,
-			"videoPosts" : videoPostsOut,
+			"videoPosts" : feed.videoPosts,
 			"storyPosts": storyPostsOut,
-			"groupPosts" : groupPostsOut,
-			"topicPosts" : topicPostsOut,
+			"groupPosts" : feed.groupPosts,
 			"marketPlacePosts": marketPlacePostsOut
 		}
 		
@@ -1626,7 +1570,9 @@ const GetPostsByRegion = async(feed,userId)=>{
 	
 }
 
-const GetPostsByInterest = async(feed,data)=>{
+
+
+const GetPostsByInterest = async(feed,accessor)=>{
 	
 	let output;
 	
@@ -1642,125 +1588,13 @@ const GetPostsByInterest = async(feed,data)=>{
 		for(var i=0; i<userPosts.length; i++){
 			
 			let it = userPosts[i]
-			let accessor = await GetUserData(userId)
-			let address1 = GetUserRegion(accessor)
-			let basics = userPosts[i].basicDetails;
-			let ownerId = basics.ownerId
-			let user = await GetUserData(ownerId)
-			let address2 = GetUserRegion(user)
 			
 			if(
-				address1.country != address2.country &&
-				InterestsEval(accessor,it) == true
+				await InterestsEval(accessor,it) == true
 			){
 				userPostsOut.push(it)
 			}
 			
-		}
-		
-		let userPosts2 = data.userPosts
-		for(var i=0; i<userPosts2.length; i++){
-			let it = userPosts2[i]
-			userPostsOut.push(it)
-		}
-		
-		//sort video posts 
-		
-		let videoPosts = feed.videoPosts
-		let videoPostsOut = []
-		
-		for(var i=0; i<videoPosts.length; i++){
-			
-			let it = videoPosts[i]
-			let accessor = await GetUserData(userId)
-			let address1 = GetUserRegion(accessor)
-			let basics = videoPosts[i].basicDetails;
-			let ownerId = basics.ownerId
-			let user = await GetUserData(ownerId)
-			let address2 = GetUserRegion(user)
-			
-			let drp1 = address1.districtRegionProvince.toRegex()
-			let c1 = address1.city.toRegex()
-			
-			if(
-				address1.country != address2.country &&
-				InterestsEval(accessor,it) == true
-			){
-				videoPostsOut.push(it)
-			}
-			
-		}
-		
-		let videoPosts2 = data.videoPosts
-		for(var i=0; i<videoPosts2.length; i++){
-			let it = videoPosts2[i]
-			videoPostsOut.push(it)
-		}
-		
-		//sort group posts 
-		
-		let groupPosts = feed.groupPosts
-		let groupPostsOut = []
-		
-		for(var i=0; i<groupPosts.length; i++){
-			
-			let it = groupPosts[i]
-			let accessor = await GetUserData(userId)
-			let address1 = GetUserRegion(accessor)
-			let basics = groupPosts[i].basicDetails;
-			let ownerId = basics.ownerId
-			let user = await GetUserData(ownerId)
-			let address2 = GetUserRegion(user)
-			
-			let drp1 = address1.districtRegionProvince.toRegex()
-			let c1 = address1.city.toRegex()
-			
-			if(
-				address1.country != address2.country &&
-				InterestsEval(accessor,it) == true
-			){
-				groupPostsOut.push(it)
-			}
-			
-		}
-		
-		let groupPosts2 = data.groupPosts
-		for(var i=0; i<groupPosts2.length; i++){
-			let it = groupPosts2[i]
-			groupPostsOut.push(it)
-		}
-		
-		//sort topic posts 
-		
-		let topicPosts = feed.topicPosts
-		let topicPostsOut = []
-		
-		for(var i=0; i<topicPosts.length; i++){
-			
-			let it = topicPosts[i]
-			let accessor = await GetUserData(userId)
-			let address1 = GetUserRegion(accessor)
-			let basics = topicPosts[i].basicDetails;
-			let ownerId = basics.ownerId
-			let user = await GetUserData(ownerId)
-			let address2 = GetUserRegion(user)
-			
-			let drp1 = address1.districtRegionProvince.toRegex()
-			let c1 = address1.city.toRegex()
-			
-			if(
-				address1.country != address2.country &&
-				InterestsEval(accessor,it) == true
-			){
-				topicPostsOut.push(it)
-			}
-			
-		}
-		
-		let topicPosts2 = data.topicPosts
-		for(var i=0; i<topicPosts2.length; i++){
-			let it = topicPosts2[i]
-			topicPostsOut.push(it)
 		}
 		
 		//sort market place posts 
@@ -1771,29 +1605,12 @@ const GetPostsByInterest = async(feed,data)=>{
 		for(var i=0; i<marketPlacePosts.length; i++){
 			
 			let it = marketPlacePosts[i]
-			let accessor = await GetUserData(userId)
-			let address1 = GetUserRegion(accessor)
-			let basics = marketPlacePosts[i].basicDetails;
-			let ownerId = basics.ownerId
-			let user = await GetUserData(ownerId)
-			let address2 = GetUserRegion(user)
-			
-			let drp1 = address1.districtRegionProvince.toRegex()
-			let c1 = address1.city.toRegex()
-			
 			if(
-				address1.country != address2.country &&
-				InterestsEval(accessor,it) == true
+				await InterestsEval(accessor,it) == true
 			){
 				marketPlacePostsOut.push(it)
 			}
 			
-		}
-		
-		let marketPlacePosts2 = data.marketPlacePosts
-		for(var i=0; i<marketPlacePosts2.length; i++){
-			let it = marketPlacePosts2[i]
-			marketPlacePostsOut.push(it)
 		}
 		
 		//sort story posts 
@@ -1804,29 +1621,16 @@ const GetPostsByInterest = async(feed,data)=>{
 		for(var i=0; i<storyPosts.length; i++){
 			
 			let it = storyPosts[i]
-			let accessor = await GetUserData(userId)
-			let address1 = GetUserRegion(accessor)
-			let basics = storyPosts[i].basicDetails;
-			let ownerId = basics.ownerId
-			let user = await GetUserData(ownerId)
-			let address2 = GetUserRegion(user)
-			
-			let drp1 = address1.districtRegionProvince.toRegex()
-			let c1 = address1.city.toRegex()
+			let basicDetails = it.basicDetails 
+			let ownerId = basicDetails.ownerId
+			let businessId = basicDetails.businessId
 			
 			if(
-				address1.country != address2.country &&
-				ConnectionEval(accessor,user) == true
+				await ConnectionEval(accessor,ownerId,businessId) == true
 			){
 				storyPostsOut.push(it)
 			}
 			
-		}
-		
-		let storyPosts2 = data.storyPosts
-		for(var i=0; i<storyPosts2.length; i++){
-			let it = storyPosts2[i]
-			storyPostsOut.push(it)
 		}
 		
 		output = {
@@ -1834,10 +1638,9 @@ const GetPostsByInterest = async(feed,data)=>{
 			"userPosts" : userPostsOut,
 			"channelPosts" :  feed.channelPosts,
 			"articles" : feed.articles,
-			"videoPosts" : videoPostsOut,
+			"videoPosts" : feed.videoPosts,
 			"storyPosts": storyPostsOut,
-			"groupPosts" : groupPostsOut,
-			"topicPosts" : topicPostsOut,
+			"groupPosts" : feed.groupPosts,
 			"marketPlacePosts": marketPlacePostsOut
 		}
 		
@@ -1889,106 +1692,6 @@ const TimePeriodProcessor = async(feed)=>{
 			}
 			
 		}
-		
-		//sort video posts 
-		
-		let videoPosts = feed.videoPosts
-		let videoPostsOut = []
-		
-		for(var i=0; i<videoPosts.length; i++){
-			
-			let it = videoPosts[i]
-			let d1 = serverTime.date
-			let m1 = serverTime.month
-			let y1 = serverTime.year
-			
-			let postTime = it.basicDetails.timePosted 
-			
-			let d2 = postTime.date
-			let m2 = postTime.month
-			let y2 = postTime.year
-			
-			if(
-				y1 == y2
-			){
-				videoPostsOut.push(it)
-			}else{
-				if(
-					y2 == (y1-1) &&
-					m2 >= 10 
-				){
-					videoPostsOut.push(it)
-				}
-			}
-			
-		}
-		
-		//sort group posts 
-		
-		let groupPosts = feed.groupPosts
-		let groupPostsOut = []
-		
-		for(var i=0; i<groupPosts.length; i++){
-			
-			let it = groupPosts[i]
-			let d1 = serverTime.date
-			let m1 = serverTime.month
-			let y1 = serverTime.year
-			
-			let postTime = it.basicDetails.timePosted 
-			
-			let d2 = postTime.date
-			let m2 = postTime.month
-			let y2 = postTime.year
-			
-			if(
-				y1 == y2
-			){
-				groupPostsOut.push(it)
-			}else{
-				if(
-					y2 == (y1-1) &&
-					m2 >= 10 
-				){
-					groupPostsOut.push(it)
-				}
-			}
-			
-		}
-		
-		//sort topic posts 
-		
-		let topicPosts = feed.topicPosts
-		let topicPostsOut = []
-		
-		for(var i=0; i<topicPosts.length; i++){
-			
-			let it = topicPosts[i]
-			let d1 = serverTime.date
-			let m1 = serverTime.month
-			let y1 = serverTime.year
-			
-			let postTime = it.basicDetails.timePosted 
-			
-			let d2 = postTime.date
-			let m2 = postTime.month
-			let y2 = postTime.year
-			
-			if(
-				y1 == y2
-			){
-				topicPostsOut.push(it)
-			}else{
-				if(
-					y2 == (y1-1) &&
-					m2 >= 10 
-				){
-					topicPostsOut.push(it)
-				}
-			}
-			
-		}
-		
 		//sort market place posts 
 		
 		let marketPlacePosts = feed.marketPlacePosts
@@ -2019,40 +1722,6 @@ const TimePeriodProcessor = async(feed)=>{
 					marketPlacePostsOut.push(it)
 				}
 			}
-			
-		}
-		
-		//sort story posts 
-		
-		let storyPosts = feed.storyPosts
-		let storyPostsOut = []
-		
-		for(var i=0; i<storyPosts.length; i++){
-			
-			let it = storyPosts[i]
-			let d1 = serverTime.date
-			let m1 = serverTime.month
-			let y1 = serverTime.year
-			
-			let postTime = it.basicDetails.timePosted 
-			
-			let d2 = postTime.date
-			let m2 = postTime.month
-			let y2 = postTime.year
-			
-			if(
-				y1 == y2
-			){
-				storyPostsOut.push(it)
-			}else{
-				if(
-					y2 == (y1-1) &&
-					m2 >= 10 
-				){
-					storyPostsOut.push(it)
-				}
-			}
-			
 			
 		}
 		
@@ -2159,12 +1828,568 @@ const TimePeriodProcessor = async(feed)=>{
 			
 		}
 		
-		
+		output = {
+			"businessPosts" : businessPostsOut,
+			"userPosts" : userPostsOut,
+			"channelPosts" :  channelPostsOut,
+			"articles" : articlesOut,
+			"videoPosts" : feed.videoPosts,
+			"storyPosts": feed.storyPosts,
+			"groupPosts" : feed.groupPosts,
+			"marketPlacePosts": marketPlacePostsOut
+		}
 		
 		
 	}catch{
 		output = null
 	}
+}
+
+/*
+
+	*userPosts contains basic text and media posts from businesses and users
+	*this function is designed to get only posts from businesses which are in line with user interests
+	*this function is designed to get only posts from users who share similar interests
+*/
+const InterestsEval = async(userId,post)=>{
+	let output = false
+	
+	let basicDetails = post.basicDetails 
+	
+	let accessorData = await GetUserData(userId)
+	
+	let interests = accessorData.interests
+	
+	let ownerId = post.ownerId
+	let businessId = post.ownerId
+	
+	if(businessId != null){
+		
+		//handle posts from businesses
+		let map = await getBusinessToInterestsMap()
+		
+		let business = await GetBusinessData(businessId)
+		
+		let category = business.category
+		
+		for(var i=0; i<interests.length; i++){
+			
+			let interest = interests[i]
+			
+			let associatedCategories = map[interest]
+			
+			if(associatedCategories.includes(category) == true){
+				output = true
+			}
+			
+		}
+		
+	}else{
+		
+		//handle posts from users
+		let ownerData = await GetUserData(ownerId)
+		
+		let ownerInterests = ownerData.interests
+		
+		let count = 0
+		
+		for(var i=0; i<interests.length; i++){
+			
+			let interest = interests[i]
+			if(ownerInterests.includes(interest)){
+				let newCount = count+1
+				count = newCount
+			}
+			
+		}
+		if(count >= 2){
+			output = true
+		}
+		
+	}
+	
+	return output
+}
+
+const ConnectionEval = async(accessorId,ownerId,businessId)=>{
+	
+	let output = false
+	
+	let mainUser = await GetUserData(accessorId)
+	
+	let interests = mainUser.interests
+	let pagesFollowed = mainUser.pagesFollowed
+	let friends = mainUser.friends
+	
+	if(businessId == null){
+		
+		let businessUser = await GetBusinessData(businessId)
+		
+		if(pagesFollowed.includes(businessUser.businessId) == true){
+			output = true
+		}else{
+			let map = await getBusinessToInterestsMap()
+			
+			//Evaluate user interests verses business category
+			async function evaluateInterests(businessId,interests){
+				let output = true
+				
+				let business = await GetBusinessData(businessId)
+				
+				let category = business.category
+				
+				for(var i=0; i<interests.length; i++){
+					
+					let interest = interests[i]
+					
+					let associatedCategories = map[interest]
+					
+					if(associatedCategories.includes(category) == true){
+						output = true
+					}
+					
+				}
+				
+				return output
+			}
+			
+			async function checkFriendsFollow(friends){
+				
+				let output = false 
+				
+				let count = 0
+				
+				for(var i=0; i<friends.length; i++){
+					
+					let x = friends[i]
+					
+					let friend = await GetUserData(friend)
+					
+					let followedPages = friend.followedPages 
+					
+					if(followedPages.includes(friend) == true){
+						
+						let newCount = count+1
+						count = newCount
+						
+					}
+					
+				}
+				
+				if(count > 3){
+					output = true
+				}
+				
+				return output 
+				
+			}
+			
+			//Check if the business matches user interests and if atleast 3 friends also follow this business
+			
+			if(await evaluateInterests(businessId,interests) == true && await checkFriendsFollow(friends) == true){
+				
+				output = true
+				
+			}
+			
+		}
+		
+	}else{
+		
+		let normalUser = await GetUserData(ownerId)
+		if(friends.includes(normalUser.userId) == true){
+			output = true
+		}
+		
+	}
+	
+	return output
+	
+}
+
+const GetBizPostsByInterest = async(feed,userId)=>{
+	
+	let output;
+	
+	let businessPosts = feed.businessPosts 
+	
+	let businessPostsOut = []
+	
+	let user = await GetUserData(userId)
+	
+	//Map of user interests versus array of associated business categories
+	
+	let map = await getBusinessToInterestsMap()
+	
+	//Evaluate user interests verses business category
+	async function evaluateInterests(businessId,interests){
+		let output = true
+		
+		let business = await GetBusinessData(businessId)
+		
+		let category = business.category
+		
+		for(var i=0; i<interests.length; i++){
+			
+			let interest = interests[i]
+			
+			let associatedCategories = map[interest]
+			
+			if(associatedCategories.includes(category) == true || map[interest] == "General"){
+				output = true
+			}
+			
+		}
+		
+		return output
+	}
+
+	// start with all business posts from pages followed by the user 	
+	let pagesFollowed = user.pagesFollowed
+	for(var i=0; i<businessPosts.length; i++){
+		
+		let post = businessPosts[i]
+		let basicDetails = post.basicDetails 
+		let businessId = basicDetails.businessId
+		if(pagesFollowed.includes(businessId) == true){
+			businessPostsOut.push(post)
+		}
+		
+	}
+	
+	//get business posts from pages which suite user interests
+	let userInterests = user.interests
+	for(var i=0; i<businessPosts.length; i++){
+		
+		let post = businessPosts[i]
+		let basicDetails = post.basicDetails 
+		let businessId = basicDetails.businessId
+		if(evaluateInterests(businessId,userInterests) == true){
+			businessPostsOut.push(post)
+		}
+		
+	}
+	
+	//get business posts according to posts viewed by friends of this user because they may share similar interests
+	let friends = user.friends
+	for(var i=0; i<businessPosts.length; i++){
+		
+		let post = businessPosts[i]
+		let basicDetails = post.basicDetails 
+		let views = basicDetails.views
+		let count = 0
+		for(var x=0; x<views.length;x++){
+			
+			let log = views[i]
+			
+			let view_user_id = log.userId
+			
+			if(friends.includes(view_user_id) == true){
+				let newCount = count+1
+				count = newCount
+			}
+			
+		}
+		if(count >= 7){
+			businessPostsOut.push(post)
+		}
+		
+	}
+	
+	output = {
+		"businessPosts" : businessPostsOut,
+		"userPosts" : feed.userPosts,
+		"channelPosts" :  feed.channelPosts,
+		"articles" : feed.articles,
+		"videoPosts" : feed.videoPosts,
+		"storyPosts": feed.storyPosts,
+		"groupPosts" : feed.groupPosts,
+		"marketPlacePosts": feed.marketPlacePosts
+	}
+	
+	return output
+	
+}
+
+const ProcessVideoPosts = async(feed,userId)=>{
+	
+	let output;
+	
+	let videoPostsOut = []
+	
+	let videos = feed.videoPosts
+	
+	let user = await GetUserData(userId)
+	
+	let interests = user.interests
+	let friends = user.friends
+	
+	async function CheckVideoChannel(video){
+		
+		let output = false
+		
+		let basicDetails = video.basicDetails 
+		let businessId = basicDetails.businessId 
+		let business = await GetBusinessData(businessId)
+		let category = business.category
+		let map = await getBusinessToInterestsMap()
+		
+		for(var i=0; i<interests.length; i++){
+			
+			let interest = interests[i]
+			let categories = map[interest]
+			if(categories.includes(category)==true){
+				output = true
+			}
+			
+		}
+		return output
+	}
+	
+	async function CheckVideosOfFriends(video){
+		
+		let output = false
+		
+		let titles = []
+		let categories = []
+		let descriptions = []
+		
+		let hits = 0
+		
+		for(var i=0; i<friends.length; i++){
+			
+			let x = friends[i]
+			let friend = await GetUserData(x)
+			let history = friend.videoHistory
+			for(var y=0; y<history.length; y++){
+				
+				let video_x = history[y]
+				
+				let title = video_x.title
+				let description = video_x.title
+				let category = video_x.category
+				
+				if(titles.includes(title) == true){
+					titles.push(title)
+				}
+				if(descriptions.includes(description) == true){
+					descriptions.push(description)
+				}
+				if(categories.includes(category) == true){
+					categories.push(category)
+				}
+				
+			}
+			
+		}
+		
+		let titleCheck = false
+		let catCheck = false
+		let descCheck = false
+		
+		for(var i=0; i<titles.length; i++){
+			let title = titles[i]
+			let category = categories[i]
+			let description = descriptions[i]
+			let regex1 = RegExp(title)
+			let regex2 = RegExp(category)
+			let regex3 = RegExp(description)
+			if(regex1.test(video.title) == true){
+				titleCheck = true
+			}
+			if(regex2.test(video.category) == true){
+				catCheck = true
+			}
+			if(regex3.test(video.description) == true){
+				descCheck = true
+			}
+		}
+		
+		let keywords = video.keywords
+		
+		for(var i=0; i<keywords.length; i++){
+			
+			let keyword = keywords[i]
+			
+			let regex = RegExp(keyword)
+			
+			for(var x=0; x<titles.length; x++){
+				
+				let title = titles[x]
+				let category = categories[x]
+				let description = descriptions[x]
+				
+				if(
+					regex.test(title) == true ||
+					regex.test(category) == true ||
+					regex.test(description) == true 
+				){
+					hits = hits+1
+				}
+				
+			}
+			
+		}
+		
+		if(
+			titlesCheck == true ||
+			descCheck == true ||
+			catCheck == true &&
+			hits >= 20
+		){
+			output = true
+		}
+		
+		return output
+	}
+	
+	async function CheckVideoHistory(video){
+		
+		let output = false
+		
+		let titles = []
+		let categories = []
+		let descriptions = []
+		
+		let hits = 0
+		
+		let history = user.videoHistory
+		for(var y=0; y<history.length; y++){
+			
+			let video_x = history[y]
+			
+			let title = video_x.title
+			let description = video_x.title
+			let category = video_x.category
+			
+			if(titles.includes(title) == true){
+				titles.push(title)
+			}
+			if(descriptions.includes(description) == true){
+				descriptions.push(description)
+			}
+			if(categories.includes(category) == true){
+				categories.push(category)
+			}
+			
+		}
+		
+		let titleCheck = false
+		let catCheck = false
+		let descCheck = false
+		
+		for(var i=0; i<titles.length; i++){
+			let title = titles[i]
+			let category = categories[i]
+			let description = descriptions[i]
+			let regex1 = RegExp(title)
+			let regex2 = RegExp(category)
+			let regex3 = RegExp(description)
+			if(regex1.test(video.title) == true){
+				titleCheck = true
+			}
+			if(regex2.test(video.category) == true){
+				catCheck = true
+			}
+			if(regex3.test(video.description) == true){
+				descCheck = true
+			}
+		}
+		
+		let keywords = video.keywords
+		
+		for(var i=0; i<keywords.length; i++){
+			
+			let keyword = keywords[i]
+			
+			let regex = RegExp(keyword)
+			
+			for(var x=0; x<titles.length; x++){
+				
+				let title = titles[x]
+				let category = categories[x]
+				let description = descriptions[x]
+				
+				if(
+					regex.test(title) == true ||
+					regex.test(category) == true ||
+					regex.test(description) == true 
+				){
+					hits = hits+1
+				}
+				
+			}
+			
+		}
+		
+		if(
+			titlesCheck == true ||
+			descCheck == true ||
+			catCheck == true &&
+			hits >= 20
+		){
+			output = true
+		}
+		
+		return output
+	}
+	
+	async function MatchKeywordsToInterests(video){
+		
+		let output = false 
+		
+		let keywords = video.keywords 
+		
+		for(var i=0; i<keywords.length; i++){
+			let keyword = keywords[i]
+			for(var x=0; x<interests.length; x++){
+				if(interests[x] === keyword){
+					output = true
+					break
+				}
+			}
+			if(output == true){
+				break
+			}
+		}
+		
+		return output 
+		
+	}
+	
+	for(var i=0; i<videos.length; i++){
+		
+		let video = videos[i]
+		
+		/*
+			*Check to see if video category and title matches the categories of other videos which have been watched
+			*Check to see if video category and title matches videos which have been watched by friends
+			*Check to see if video was published by a channel which is in line with user interests
+		*/
+		if(
+			await CheckVideoHistory(video) == true||
+			await CheckVideosOfFriends(video) == true ||
+			await CheckVideoChannel(video) == true ||
+			await MatchKeywordsToInterests(video) == true
+		){
+			videoPostsOut.push(video)
+		}
+		
+	}
+	
+	output = {
+		"businessPosts" : feed.businessPosts,
+		"userPosts" : feed.userPosts,
+		"channelPosts" :  feed.channelPosts,
+		"articles" : feed.articles,
+		"videoPosts" : videoPostsOut,
+		"storyPosts": feed.storyPosts,
+		"groupPosts" : feed.groupPosts,
+		"marketPlacePosts": feed.marketPlacePosts
+	}
+	
+	return output
+	
 }
 
 const InterestsProcessor = async(feed,userId)=>{
@@ -2180,8 +2405,9 @@ const InterestsProcessor = async(feed,userId)=>{
 	
 	/*Similar Area Posts*/
 	let similar_area = await GetPostsByRegion(feed,userId);
-	let posts_by_interest = await GetPostsByInterest(feed,similar_area);
+	let posts_by_interest = await GetPostsByInterest(feed,userId);
 	let process_business_posts_by_interest = await GetBizPostsByInterest(posts_by_interest)
+	let filterVideos = await ProcessVideoPosts(process_business_posts_by_interest,userId)
 	
 	output = process_business_posts_by_interest
 	
@@ -2191,20 +2417,7 @@ const InterestsProcessor = async(feed,userId)=>{
 
 /////////////////////////////////////////////////////////////*Post Data Helpers END*//////////////////////////////////////////////////////////////////////////////////
 
-app.get("/process-payment",async(request,response)=>{
-    try{
-        response.sendFile(__dirname+"/paymentsection.html") 
-    }catch{
-        response.send(JSON.stringify({"status":"server-error"}))
-    }
-})
-app.get("/",async(request,response)=>{
-    try{
-        response.sendFile(__dirname+"/downloadmenu.html") 
-    }catch{
-        response.send(JSON.stringify({"status":"server-error"}))
-    }
-})
+
 
 async function filterDeletedPosts(dataFeed){
 	
@@ -2265,6 +2478,130 @@ async function filterDeletedPosts(dataFeed){
 	return dataFeed
 }
 
+const getGroupPosts = async(userPosts,userId)=>{
+	
+	let output;
+	
+	//get the specific user
+	let x = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"user-profiles"})
+	let users = x.body
+	let user = users.find((users)=>{
+		return users.userId === userId
+	})
+	
+	let blockedUsers = user.preferences.blockedUsers
+	let blockedBusinesses = user.preferences.blockedBusinesses
+	
+	//get groups the user belongs to
+	let groupIDs = []
+	
+	let groupsOwned = user.groupsOwned 
+	let groupsJoined = user.groups
+	
+	for(var i=0; i<groupsOwned.length; i++){
+		groupIDs.push(groupsOwned[i])
+	}
+	for(var i=0; i<groupsJoined.length; i++){
+		groupIDs.push(groupsJoined[i])
+	}
+	
+	let collection = []
+	
+	//collect all posts belonging to the groups in which user belongs
+	for(var i=0; i<userPosts.length; i++){
+		
+		let basicDetails = userPosts[i].basicDetails
+		if(basicDetails.groupPost == true){
+			if(groupIDs.includes(groupId) == true){
+				collection.push(userPosts[i])
+			}
+		} 
+		
+	}
+	
+	//filter posts for the current year
+	for(var i=0; i<collection.length; i++){
+		
+		let basicDetails = collection[i].basicDetails
+		let timePosted = basicDetails.timePosted 
+		let year = timePosted.year
+		//remove all posts outside the current year
+		if(serverTime.year != year){
+			collection.splice(i,1)
+		}
+		
+	}
+	
+	//re-inject posts with high number of views in current month
+	for(var i=0; i<userPosts.length; i++){
+		
+		let post = userPosts[i]
+		let basicDetails = userPosts[i].basicDetails
+		if(basicDetails.groupPost == true){
+			if(groupIDs.includes(groupId) == true){
+				
+				let views = basicDetails.views
+				let timePosted = basicDetails.timePosted 
+				let year = timePosted.year 
+				if(year < serverTime.year){
+					
+					let viewsCount = 0
+					
+					//count the number of views in the current month and the month before
+					
+					for(var v=0; v<views.length; v++){
+						let view = views[x]
+						let viewDate = view.timePosted
+						let month = viewDate.month
+						if(serverTime.month > 0){							
+							if(month == serverTime.month || month == serverTime.month-1){
+								let newCount = viewsCount+1
+								viewsCount = newCount
+							}
+						}else{
+							if(month == serverTime.month || month == 11){
+								let newCount = viewsCount+1
+								viewsCount = newCount
+							}
+						}
+					}
+					
+					//if the current number of views exceeds atleast 30 people add this post to the collection
+					if(viewsCount >= 30){
+						collection.push(post)
+					}
+					
+				}
+				
+			}
+		} 
+		
+	}
+	
+	//filter out the posts of blocked users and businesses
+	for(var i=0; i<collection.length; i++){
+		
+		let post = collection[i] 
+		let basicDetails = post.basicDetails 
+		let businessId = basicDetails.businessId
+		let ownerId = basicDetails.ownerId
+		
+		if(businessId != null){
+			if(blockedBusinesses.includes(businessId) == true){
+				collection.splice(i,1)
+			}
+		}else{
+			if(blockedUsers.includes(ownerId) == true){
+				collection.splice(i,1)
+			}
+		}
+		
+	}
+	
+	return output
+	
+}
+
 app.post("/get-posts-data", async(request,response)=>{
     
     try{
@@ -2282,8 +2619,6 @@ app.post("/get-posts-data", async(request,response)=>{
             var getChannelPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"channel-posts"})
             var getArticlePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"article-posts"})
             var getVideoPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"video-posts"})
-            var getTopicPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"topic-posts"})
-            var getGroupPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"group-posts"})
             var getStoryPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"story-posts"})
             var getMarketPlacePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"market-place-posts"})
             
@@ -2296,20 +2631,20 @@ app.post("/get-posts-data", async(request,response)=>{
             let articles = getArticlePosts.body 
             let videoPosts = getVideoPosts.body
             let storyPosts = getStoryPosts.body
-            let groupPosts = getGroupPosts.body
-            let topicPosts = getTopicPosts.body
             let marketPlacePosts = getMarketPlacePosts.body
+			let groupPosts = await getGroupPosts(userPosts,userId)
+            
+			
             
             let dataFeed = {
-                "businessPosts" : businessPosts,
-                "userPosts" : userPosts,
-                "channelPosts" :  channelPosts,
-                "articles" : articles,
-                "videoPosts" : videoPosts,
-                "storyPosts": storyPosts,
-                "groupPosts" : groupPosts,
-                "topicPosts" : topicPosts,
-                "marketPlacePosts": marketPlacePosts
+                "businessPosts":businessPosts,
+                "userPosts":userPosts,
+                "channelPosts":channelPosts,
+                "articles": articles,
+                "videoPosts":videoPosts,
+                "storyPosts":storyPosts,
+                "groupPosts":groupPosts,
+                "marketPlacePosts":marketPlacePosts
             }
             
             //Processes (in this order)
@@ -2317,8 +2652,7 @@ app.post("/get-posts-data", async(request,response)=>{
 			let filterDeleted = await filterDeletedPosts(dataFeed)
             let process_for_interests = await InterestsProcessor(filterDeleted,userId)
 			let process_for_dates = await TimePeriodProcessor(process_for_interests)
-            let process_for_views_count = await ViewsProcessor(process_for_dates,userId)
-            output = await process_for_views_count
+            output = await process_for_dates
             
 			if(output){				
 				response.send(JSON.stringify({"status":"success","data":output}))  
@@ -2417,7 +2751,6 @@ app.post("/get-video-categories", async(request,response)=>{
 		let userId = data.userId 
 		let socketCheck = await checkIfSocketActive(userId)
 		if(socketCheck == true){
-			
 			let getVideos = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"video-posts"})
 			let videos = getVideos.body 
 			
@@ -2473,14 +2806,15 @@ app.post("/get-videos-by-category", async(request,response)=>{
 
 app.post("/upload-user-image/:id", async(request,response)=>{
     
-    try{ 
+    //try{ 
         let userId = request.params.id
         let check = await checkIfSocketActive(userId)
         let socket = getUserSocket(userId)
         let mediaId = socket.mediaId
         let mediaFormat = socket.mediaFormat
         if(check == true){ 
-            let data = request.body
+            let data = request.file
+			console.log(data)
             data.mv(__dirname + `/User Data/${userId}/Images/${mediaId}.${mediaFormat}` , (error)=>{
                 if(error){
                     console.log(error)
@@ -2489,9 +2823,9 @@ app.post("/upload-user-image/:id", async(request,response)=>{
                 }
             })
         } 
-    }catch{
-        response.sendStatus(404)
-    }
+    //}catch{
+        //response.sendStatus(404)
+    //}
     
 })
 
@@ -6164,45 +6498,45 @@ function createDirectory(string){
 function createUserDirectories(user){
     var output = false
     var userId = user.userId
-    fs.mkdir(path.join(__dirname+`/User Data/${userId}`, (error)=>{
+    fs.mkdir(__dirname+`/User Data/${userId}`, (error)=>{
         if(!error) {
-            fs.mkdir(path.join(__dirname+`/User Data/${userId}/Images`, (error)=>{
+            fs.mkdir(__dirname+`/User Data/${userId}/Images`, (error)=>{
                 if(!error){
-                    fs.mkdir(path.join(__dirname+`/User Data/${userId}/Videos`, (error)=>{
+                    fs.mkdir(__dirname+`/User Data/${userId}/Videos`, (error)=>{
                         if(!error){
-                            fs.mkdir(path.join(__dirname+`/User Data/${userId}/Audio`, (error)=>{
+                            fs.mkdir(__dirname+`/User Data/${userId}/Audio`, (error)=>{
                                 if(!error){
-                                    fs.mkdir(path.join(__dirname+`/User Data/${userId}/HLSPlaylists`, (error)=>{
+                                    fs.mkdir(__dirname+`/User Data/${userId}/HLSPlaylists`, (error)=>{
                                         if(!error){
-                                            fs.mkdir(path.join(__dirname+`/User Data/${userId}/Data`, (error)=>{
+                                            fs.mkdir(__dirname+`/User Data/${userId}/Data`, (error)=>{
                                                 if(!error){
-                                                    fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses`, (error)=>{
+                                                    fs.mkdir(__dirname+`/User Data/${userId}/Businesses`, (error)=>{
                                                         output = true
-                                                    }))
+                                                    })
                                                 }else{
                                                     console.log(error)
                                                 }
 												
-                                            }))
+                                            })
                                             
                                         }else{
                                             console.log(error)
                                         }
-                                    }))
+                                    })
                                 }else{
                                     console.log(error)
                                 }
-                            }))
+                            })
                         }else{
                             console.log(error)
                         }
-                    }))
+                    })
                 }else{
                     console.log(error)
                 }
-            }))
+            })
         }
-    }))
+    })
     
     
     if(output == true){
@@ -6251,82 +6585,82 @@ function createUserDirectories(user){
 function createBusinessDirectories(userId,businessId){
     let output = false
     
-	fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}`, (error)=>{
+	fs.mkdir(__dirname+`/User Data/${userId}/Businesses/${businessId}`, (error)=>{
         if(!error) {
-            fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}/Images`, (error)=>{
+            fs.mkdir(__dirname+`/User Data/${userId}/Businesses/${businessId}/Images`, (error)=>{
                 if(!error){
-                    fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}/Videos`, (error)=>{
+                    fs.mkdir(__dirname+`/User Data/${userId}/Businesses/${businessId}/Videos`, (error)=>{
                         if(!error){
-                            fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}/Audio`, (error)=>{
+                            fs.mkdir(__dirname+`/User Data/${userId}/Businesses/${businessId}/Audio`, (error)=>{
                                 if(!error){
-                                    fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}/HLSPlaylists`, (error)=>{
+                                    fs.mkdir(__dirname+`/User Data/${userId}/Businesses/${businessId}/HLSPlaylists`, (error)=>{
                                         if(!error){
-                                            fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}/Data`, (error)=>{
+                                            fs.mkdir(__dirname+`/User Data/${userId}/Businesses/${businessId}/Data`, (error)=>{
                                                 if(!error){
                                                     output = true
                                                 }else{
                                                     console.log(error)
                                                 }
 												
-                                            }))
+                                            })
                                             
                                         }else{
                                             console.log(error)
                                         }
-                                    }))
+                                    })
                                 }else{
                                     console.log(error)
                                 }
-                            }))
+                            })
                         }else{
                             console.log(error)
                         }
-                    }))
+                    })
                 }else{
                     console.log(error)
                 }
-            }))
+            })
         }
-    }))
+    })
 	
 	if(output == true){
         //Create video directories 
-        fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}/144videos`, (error)=>{
+        fs.mkdir(__dirname+`/User Data/${userId}/Businesses/${businessId}/144videos`, (error)=>{
             if(error){
                 console.log(error)
             }else{
-                fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}/240videos`, (error)=>{
+                fs.mkdir(__dirname+`/User Data/${userId}/Businesses/${businessId}/240videos`, (error)=>{
                     if(error){
                         console.log(error)
                     }else{
-                        fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}/360videos`, (error)=>{
+                        fs.mkdir(__dirname+`/User Data/${userId}/Businesses/${businessId}/360videos`, (error)=>{
                             if(error){
                                 console.log(error)
                             }else{
-                                fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}/480videos`, (error)=>{
+                                fs.mkdir(__dirname+`/User Data/${userId}/Businesses/${businessId}/480videos`, (error)=>{
                                     if(error){
                                         console.log(error)
                                     }else{
-                                        fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}/720videos`, (error)=>{
+                                        fs.mkdir(__dirname+`/User Data/${userId}/Businesses/${businessId}/720videos`, (error)=>{
                                             if(error){
                                                 console.log(error)
                                             }else{
-                                                fs.mkdir(path.join(__dirname+`/User Data/${userId}/Businesses/${businessId}/1080videos`, (error)=>{
+                                                fs.mkdir(__dirname+`/User Data/${userId}/Businesses/${businessId}/1080videos`, (error)=>{
                                                     if(error){
                                                         output = false
                                                         console.log(error)
                                                     }
-                                                }))
+                                                })
                                             }
-                                        }))
+                                        })
                                     }
-                                }))
+                                })
                             }
-                        }))
+                        })
                     }
-                }))
+                })
             }
-        }))
+        })
     }
 	
     return output
@@ -6716,16 +7050,19 @@ app.post("/change-user-names" , async( request,response )=>{
 })
 
 const SignupUser = async( input )=>{
-    let output;
+    let output = {
+		"status":null,
+		"data":null
+	};
     try{
-        Users = await mongoClient.db("YEMPData").collection("MainData").findOne({"name" : "user-profiles"})
+        let getUsers = await mongoClient.db("YEMPData").collection("MainData").findOne({"name" : "user-profiles"})
         
         let email = input.emailAddress 
        
         let users = getUsers.body
-        
+		
         let search = users.find((users)=>{
-            return user.emailAddress === email
+            return users.emailAddress === email
         })
         
         let newUser = {
@@ -6733,13 +7070,15 @@ const SignupUser = async( input )=>{
             firstName: input.firstName,
             lastName: input.lastName,
             password:input.password,
+			bio:input.bio,
+			nickname:input.nickname,
             emailAddress:input.emailAddress,
             secretQuestion: input.secretQuestion,
             secretQuestionAnswer: input.secretQuestionAnswer,
-            addressDetails:input.AddressDetails,
-            preferences: input.UserSettings,
+            addressDetails:input.addressDetails,
+            preferences: input.preferences,
             currentProfileImage: null,
-            currentLocation: input.city,
+            currentLocation: input.addressDetails.city,
             occupation: input.occupation,
             relationShipStatus: null,
             gender: input.gender, 
@@ -6751,33 +7090,61 @@ const SignupUser = async( input )=>{
             interests: [],
             viewedPosts: [],
             friends: [],
-            posts: [],
+            friendRequests: [],
+            adminRequests: [],
+            archivedStories: [],
             conversations: [],
+            posts: [],
+            closedConversations: [],
             notifications: [],
-            linkupRequests: [],
+            linkUpRequests: [],
             deliverMeQueue: [],
+            shippingRequests: [],
             schoolsAttended: [],
             tickets:[],
+            unfinishedComments:[],
+			unfinishedMessages:[],
+			incompleteSales:[],
+			unfinishedPosts:[],
             dateModified: input.dateModified, 
-            fileDeleted: Boolean = false,
+            fileDeleted:false,
             discussions: [],
             businesses: [],
-            groups: []
+            groups: [],
+			groupsOwned: [],
+			videoHistory: [],
+			playlists: [],
+			servicesBlocked:false,
+			servicesPaused:false,
+			previousProfileImages:[],
+			previousHeaderImages:[],
+			paymentsHistory:[],
+			mutedPosts:[],
+			rejectedPosts:[],
+			addedMusic:[],
+			recentSearches:[],
+			downloaded:[],
+			digitalProducts:[],
+			verified:false,
+			videoQualityIndex:null
         }
         
-        if( !search ){
+        if(search == null){
             
             users.push(newUser)
+			addUserSocket(newUser.userId)
+			createUserDirectories(newUser)
             await mongoClient.db("YEMPData").collection("MainData").updateOne({"name" : "user-profiles"},{$set:{"body":users}})
-            output = "success"
+            output.status = "success"
+			output.data = newUser
             
         }else{
-            output = "email-exists"
+            output.status = "email-exists"
         }
         
     }catch{
-        output = "server-error"
-    }
+        output.status = "server-error"
+	}
     
     return output
 }
@@ -6786,11 +7153,7 @@ app.post("/sign-up-user",async(request,response)=>{
     try{
         let data = request.body
         let process = await SignupUser(data.userData)
-        if( process == "success" ){
-			response.send(JSON.stringify({"status" : "success"}))
-        }else{
-            response.send(JSON.stringify({"status" : process}))
-        }
+        response.send(JSON.stringify(process))
     }catch{
         response.send(JSON.stringify({"status" : "server-error"}))
     }
@@ -7645,7 +8008,6 @@ app.post("/check-conversation-existence", async(request,response)=>{
 		try{
 			
 			let data = request.body 
-			
 			let accessorId = data.accessorId 
 			let userData = data.userData 
 			let socketCheck = await checkIfSocketActive(accessorId)
@@ -7689,7 +8051,7 @@ app.post("/check-conversation-existence", async(request,response)=>{
 				
 				admins.push(data)
 				
-				createUserDirectories(data.adminId)
+				createUserDirectories(data)
 				addUserSocket(data.adminId)
 				
 				await mongoClient.db("YEMPData").collection("AdminOnlyInfo").updateOne({"name":"admin-controller-data"},{$set:{"body":adminData}});
@@ -8039,7 +8401,6 @@ app.post("/check-conversation-existence", async(request,response)=>{
 
 	app.post("/check-date-and-time", (request,response)=>{
 		try{
-			
 			allocateTime()
 			let time = request.body 
 			
@@ -8832,8 +9193,9 @@ app.post("/check-conversation-existence", async(request,response)=>{
 	        ){
 	            if(story.archived == false){
 	                stories.splice(i,1)
-	            }
-	           
+	            }else{
+					
+				}
 	        }
 	    }
 	    await mongoClient.db("YEMPData").collection("MainData").updateOne({"name":"story-posts"},{$set:{"body":stories}})
@@ -9601,7 +9963,7 @@ app.post("/check-conversation-existence", async(request,response)=>{
 		}
 	})
 	
-	const getGroupPosts = async(output,array,groupId)=>{
+	const searchGroupPosts = async(output,array,groupId)=>{
 		
 		for(var i=0; i<array.length; i++){
 			let post = array[i]
@@ -9635,7 +9997,6 @@ app.post("/check-conversation-existence", async(request,response)=>{
 				var getArticlePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"article-posts"})
 				var getVideoPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"video-posts"})
 				var getReligiousPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"religious-posts"})
-				var getGroupPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"group-posts"})
 				var getStoryPosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"story-posts"})
 				var getMarketPlacePosts = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"market-place-posts"})
 				var getEvents = await mongoClient.db("YEMPData").collection("MainData").findOne({"name":"all-events"})
@@ -9649,7 +10010,6 @@ app.post("/check-conversation-existence", async(request,response)=>{
 				let articles = getArticlePosts.body 
 				let videoPosts = getVideoPosts.body
 				let storyPosts = getStoryPosts.body
-				let groupPosts = getGroupPosts.body
 				let religiousPosts = getReligiousPosts.body
 				let marketPlacePosts = getMarketPlacePosts.body
 				let events = getEvents.body
@@ -9657,16 +10017,16 @@ app.post("/check-conversation-existence", async(request,response)=>{
 				
 				let posts = []
 				
-				let p1 = await getGroupPosts(posts,businessPosts,groupId)
-				let p2 = await getGroupPosts(p1,userPosts,groupId)
-				let p3 = await getGroupPosts(p2,articles,groupId)
-				let p4 = await getGroupPosts(p3,channelPosts,groupId)
-				let p5 = await getGroupPosts(p4,videoPosts,groupId)
-				let p6 = await getGroupPosts(p5,storyPosts,groupId)
-				let p7 = await getGroupPosts(p6,religiousPosts,groupId)
-				let p8 = await getGroupPosts(p7,marketPlacePosts,groupId)
-				let p9 = await getGroupPosts(p8,events,groupId)
-				let p10 = await getGroupPosts(p9,tips,groupId)
+				let p1 = await searchGroupPosts(posts,businessPosts,groupId)
+				let p2 = await searchGroupPosts(p1,userPosts,groupId)
+				let p3 = await searchGroupPosts(p2,articles,groupId)
+				let p4 = await searchGroupPosts(p3,channelPosts,groupId)
+				let p5 = await searchGroupPosts(p4,videoPosts,groupId)
+				let p6 = await searchGroupPosts(p5,storyPosts,groupId)
+				let p7 = await searchGroupPosts(p6,religiousPosts,groupId)
+				let p8 = await searchGroupPosts(p7,marketPlacePosts,groupId)
+				let p9 = await searchGroupPosts(p8,events,groupId)
+				let p10 = await searchGroupPosts(p9,tips,groupId)
 				
 				response.send(JSON.stringify({"status":"success","data":p10}))
 				
